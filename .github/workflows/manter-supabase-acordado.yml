@@ -1,0 +1,24 @@
+# Despertador do banco de dados — WhatsApp Eventos · ILED
+# Chama o Supabase a cada 2 dias para o projeto gratuito nunca pausar.
+# Local no repositório:  .github/workflows/manter-supabase-acordado.yml
+name: Manter Supabase acordado
+
+on:
+  schedule:
+    - cron: "41 11 */2 * *"     # a cada 2 dias, por volta de 08:41 (Brasília)
+  workflow_dispatch:            # botão "Run workflow" para testar na hora
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chamar o banco (wa_ping)
+        run: |
+          code=$(curl -s -o resposta.txt -w "%{http_code}" -X POST \
+            "https://barutpeptphhqtexclji.supabase.co/rest/v1/rpc/wa_ping" \
+            -H "apikey: sb_publishable_AbdEQpBrKLl_98Lx8KxyWg_AOUNN6Bg" \
+            -H "Content-Type: application/json" \
+            -d '{"origem":"github"}')
+          echo "Resposta do banco: $(cat resposta.txt)"
+          echo "HTTP $code"
+          test "$code" = "200"

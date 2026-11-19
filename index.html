@@ -187,6 +187,21 @@ tr.dayhdr td{background:linear-gradient(90deg,rgba(225,6,0,.22),rgba(225,6,0,.04
   main{padding:12px 10px 50px} .card{padding:12px} .kpis{grid-template-columns:1fr 1fr;gap:8px}
   .toolbar > *{flex:1 1 100%} .modal{padding:12px}
 }
+.prog{height:7px;border-radius:6px;background:rgba(255,255,255,.07);overflow:hidden;margin:8px 0 6px;max-width:420px}
+.prog div{height:100%;background:linear-gradient(90deg,var(--red),#3ddc84);border-radius:6px;transition:width .4s}
+.agrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;border-bottom:1px solid var(--line)}
+.agrow:hover{background:rgba(255,255,255,.035)} .agrow.open{background:rgba(255,255,255,.05);border-bottom-color:transparent}
+.agmain{display:flex;gap:10px;align-items:center;min-width:0;flex:1}
+.agnome{font-weight:800;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.agside{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.agdet{padding:4px 12px 14px 52px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.05);border-radius:0 0 10px 10px;margin-bottom:4px}
+.ufb{flex:none;width:32px;text-align:center;font-size:10.5px;font-weight:800;padding:4px 0;border-radius:7px;background:rgba(255,255,255,.07);border:1px solid var(--line2)}
+.pill{font-size:11px;font-weight:800;padding:4px 10px;border-radius:20px;white-space:nowrap}
+.p-ok{background:rgba(61,220,132,.13);color:var(--grn);border:1px solid rgba(61,220,132,.35)}
+.p-warn{background:rgba(255,176,32,.13);color:var(--amber);border:1px solid rgba(255,176,32,.35)}
+.p-blue{background:rgba(79,140,255,.14);color:#7aa8ff;border:1px solid rgba(79,140,255,.35)}
+.p-todo{background:rgba(255,255,255,.05);color:var(--mut);border:1px solid var(--line2)}
+@media(max-width:700px){ .agrow{flex-wrap:wrap} .agside{width:100%;justify-content:flex-start;padding-left:42px} .agdet{padding-left:12px} .agnome{white-space:normal} }
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:820px){.grid2{grid-template-columns:1fr}}
 </style>
@@ -198,7 +213,7 @@ tr.dayhdr td{background:linear-gradient(90deg,rgba(225,6,0,.22),rgba(225,6,0,.04
   <img class="logo-img" src="" id="logoTopo" alt="ILED Produções">
   <div class="hcenter">
     <div class="htitle">WHATSAPP EVENTOS · ILED</div>
-    <div class="hsub">Jornadas de trabalho (entrada → saída) extraídas das conversas de grupo — com menções financeiras e comprovantes à parte</div>
+    <div class="hsub">Jornadas das equipes por evento · DP</div>
   </div>
   <div class="evsel">
     <span id="nuvem" class="nuvem">☁</span>
@@ -246,7 +261,7 @@ function carregar(){
     if(!raw) return;
     var d = JSON.parse(raw);
     STORE.eventos = d.eventos||[];
-    STORE.financeiro = d.financeiro||[];
+    STORE.financeiro = [];
     if(typeof d.apelidos==='string') STORE.apelidos = d.apelidos;
     if(d.horaBase) STORE.horaBase = d.horaBase;
     if(d.visao) STORE.visao = d.visao;
@@ -724,7 +739,7 @@ function importarConversa(nomeEvento, texto, arquivos, agendaRef, eventoId){
     marcas.forEach(function(m){ var o=mapa[m.tipo+'|'+chaveNome(m.nome)+'|'+m.tsEnvio]; if(o){ if(o.tsManual) m.tsManual=o.tsManual; if(o.validadoHora) m.validadoHora=true; if(o.ok) m.ok=o.ok; if(o.rev) m.rev=o.rev; } });
     marcas = marcas.concat(antigas.filter(function(m){return m.manual;}));
     evento.participantes = extrairParticipantes(msgs);
-    var fin = extrairFinanceiro(msgs, evento.id);
+    var fin = []; // financeiro desativado (não usado)
     STORE.marcas = STORE.marcas.filter(function(r){return r.eventoId!==evento.id;}).concat(marcas);
     STORE.financeiro = STORE.financeiro.filter(function(r){return r.eventoId!==evento.id;}).concat(fin);
     if(anexosMap){
@@ -1004,67 +1019,150 @@ function faltasEscala(eventoId, rows){
 }
 function faseDoDia(ae, dia){ return ae ? (ae.dias[dia]||'') : ''; }
 
+// ---------- Agenda do mês (visual limpo: 1 linha por evento) ----------
+var AG_EXP=null, AG_FILTRO='todos';
+function situacaoEvento(ag, e){
+  var ev=eventoDaAgenda(ag.mes, e.key);
+  var fch = ev ? fechamentoDoEvento(ev.id) : fechamentoDaAgenda(ag.mes, e.key);
+  if(fch) return {st:'fechado', ev:ev, fch:fch};
+  if(ev){
+    var jor=montarJornadas(STORE.marcas.filter(function(m){return m.eventoId===ev.id;}));
+    var pend=jor.filter(function(r){return r.alertas.length || (r.rev&&r.rev.st==='pontual');}).length;
+    return {st:'conferencia', ev:ev, jor:jor, pend:pend};
+  }
+  return {st:'afazer'};
+}
 function renderAgenda(){
   var ag=agendaAtual();
   var meses=Object.keys(STORE.agendas||{}).sort();
-  var h='<div class="card"><div class="flex" style="justify-content:space-between">'
-    +'<div><div class="section-title" style="margin-bottom:4px">📆 Agenda do mês</div><div class="muted" style="font-size:12px">Suba a planilha do mês (CRONOGRAMA do Drive, baixada em .xlsx). O sistema lista os eventos, os dias, as fases e quem está escalado.</div></div>'
-    +'<div class="flex">'+(meses.length>1?'<select onchange="AGENDA_MES=this.value;render()">'+meses.map(function(m){var p=m.split('-');return '<option value="'+m+'"'+(m===AGENDA_MES?' selected':'')+'>'+MESES_NOME[+p[1]-1]+'/'+p[0]+'</option>';}).join('')+'</select>':'')
-    +'<button class="btn" onclick="document.getElementById(\'upPlan\').click()">📊 Subir planilha do mês</button></div></div>'
-    +'<input type="file" id="upPlan" accept=".xlsx,.xls" style="display:none" onchange="lerPlanilhaMes(this.files);this.value=\'\'">'
-    +'<input type="file" id="upAgenda" accept=".zip,.txt,.md" multiple style="display:none" onchange="onUploadAgenda(this.files)">'
-    +'</div>';
-  if(!ag) return h+'<div class="card empty">Nenhuma planilha ainda. Baixe a aba <b style="color:var(--txt)">CRONOGRAMA</b> do Drive em Excel (Arquivo → Fazer download → .xlsx) e suba aqui.</div>';
+  var inputs='<input type="file" id="upPlan" accept=".xlsx,.xls" style="display:none" onchange="lerPlanilhaMes(this.files);this.value=\'\'">'
+    +'<input type="file" id="upAgenda" accept=".zip,.txt,.md" multiple style="display:none" onchange="onUploadAgenda(this.files)">';
+  if(!ag) return inputs+'<div class="card" style="text-align:center;padding:40px 20px"><div style="font-size:34px">📆</div><div style="font-weight:800;font-size:16px;margin:8px 0">Comece pela planilha do mês</div>'
+    +'<div class="muted" style="font-size:12.5px;margin-bottom:16px">No Drive: planilha do mês → aba CRONOGRAMA → Arquivo → Fazer download → Microsoft Excel (.xlsx)</div>'
+    +'<button class="btn" onclick="document.getElementById(\'upPlan\').click()">📊 Subir planilha do mês</button></div>';
 
-  var b=chaveEvento(BUSCA_A);
-  var lista=ag.eventos.filter(function(e){ return (AG_TODOS || e.nPessoas) && (!b || chaveEvento(e.titulo).indexOf(b)>=0); });
-  var cad={}; STORE.colaboradores.forEach(function(c){cad[c.id]=c;});
   var p=ag.mes.split('-');
-  h+='<div class="card"><div class="toolbar" style="margin-bottom:0">'
-    +'<b style="font-size:15px">'+MESES_NOME[+p[1]-1].toUpperCase()+' / '+p[0]+'</b>'
-    +'<button class="btn sm" style="background:#2d3142;box-shadow:none" onclick="baixarListaEventosPDF()">📄 Baixar lista de eventos (PDF)</button>'
-    +'<span class="muted" style="font-size:11.5px">'+esc(ag.arquivo)+' · lida em '+fmtDT(ag.importadoEm)+'</span>'
-    +'<input placeholder="🔎 Buscar evento…" value="'+esc(BUSCA_A)+'" oninput="setBuscaAgenda(this.value)" id="buscaA" style="min-width:200px;margin-left:auto">'
-    +'<label class="chk" style="display:flex;gap:6px;align-items:center;font-size:12px;font-weight:700"><input type="checkbox" '+(AG_TODOS?'checked':'')+' onchange="AG_TODOS=this.checked;render()" style="accent-color:var(--red)"> Mostrar também sem equipe (sublocação, visita…)</label>'
-    +'</div></div>';
-  var ultimoInicio=null;
+  var base=ag.eventos.filter(function(e){ return AG_TODOS || e.nPessoas; });
+  var sits={}; base.forEach(function(e){ sits[e.key]=situacaoEvento(ag,e); });
+  var nF=base.filter(function(e){return sits[e.key].st==='fechado';}).length, nC=base.filter(function(e){return sits[e.key].st==='conferencia';}).length, nA=base.length-nF-nC;
+  var pct=base.length?Math.round(nF*100/base.length):0;
+  var b=chaveEvento(BUSCA_A);
+  var lista=base.filter(function(e){ return (!b || chaveEvento(e.titulo).indexOf(b)>=0) && (AG_FILTRO==='todos' || sits[e.key].st===AG_FILTRO); });
+
+  // topo: mês + progresso + ações
+  var h=inputs+'<div class="card"><div class="flex" style="justify-content:space-between;align-items:center">'
+    +'<div style="min-width:220px;flex:1"><div class="flex" style="gap:8px;align-items:baseline"><span style="font-weight:800;font-size:18px;letter-spacing:-.3px">'+MESES_NOME[+p[1]-1].charAt(0).toUpperCase()+MESES_NOME[+p[1]-1].slice(1)+' '+p[0]+'</span>'
+      +(meses.length>1?'<select onchange="AGENDA_MES=this.value;render()" style="padding:3px 6px;font-size:11.5px">'+meses.map(function(m){var q=m.split('-');return '<option value="'+m+'"'+(m===AGENDA_MES?' selected':'')+'>'+MESES_NOME[+q[1]-1]+'/'+q[0]+'</option>';}).join('')+'</select>':'')+'</div>'
+      +'<div class="prog"><div style="width:'+pct+'%"></div></div>'
+      +'<div class="muted" style="font-size:12px"><b style="color:var(--grn)">'+nF+' de '+base.length+' fechados</b> · '+nC+' em conferência · '+nA+' a fazer</div></div>'
+    +'<div class="flex" style="gap:6px">'
+      +'<button class="btn ghost sm" onclick="baixarRelatorioDiretoria(\''+ag.mes+'\')">📈 Relatório da diretoria</button>'
+      +'<button class="btn ghost sm" onclick="baixarListaEventosPDF()">📄 Lista em PDF</button>'
+      +'<button class="btn ghost sm" onclick="document.getElementById(\'upPlan\').click()" title="Subir a planilha do mês de novo (o que já foi fechado não muda)">📊 Atualizar planilha</button>'
+    +'</div></div></div>';
+
+  // filtros
+  function chip(v,t,n){ return '<button class="btn ghost sm'+(AG_FILTRO===v?' active':'')+'" onclick="AG_FILTRO=\''+v+'\';AG_EXP=null;render()">'+t+' <span class="muted">'+n+'</span></button>'; }
+  h+='<div class="flex" style="margin:0 0 12px;gap:6px">'
+    +chip('todos','Todos',base.length)+chip('afazer','A fazer',nA)+chip('conferencia','Em conferência',nC)+chip('fechado','Fechados',nF)
+    +'<input id="buscaA" placeholder="🔎 Buscar evento…" value="'+esc(BUSCA_A)+'" oninput="setBuscaAgenda(this.value)" style="margin-left:auto;min-width:180px;padding:6px 10px">'
+    +'</div>';
+
+  if(!lista.length) return h+'<div class="card empty">'+(AG_FILTRO==='fechado'?'Nenhum evento fechado ainda.':(AG_FILTRO==='afazer'?'Nada a fazer — tudo encaminhado 🎉':'Nenhum evento encontrado.'))+'</div>'+rodapeAgenda();
+
+  var cad={}; STORE.colaboradores.forEach(function(c){cad[c.id]=c;});
+  h+='<div class="card" style="padding:6px">';
   lista.forEach(function(e){
-    var ev=eventoDaAgenda(ag.mes, e.key);
-    var jor = ev ? montarJornadas(STORE.marcas.filter(function(m){return m.eventoId===ev.id;})) : [];
-    var compl=jor.filter(function(r){return r.durMs!=null;}).length, conf=jor.filter(function(r){return r.alertas.length;}).length;
-    var falt = ev ? faltasEscala(ev.id, jor) : [];
-    var dias=Object.keys(e.dias).sort();
-    var fch = ev ? fechamentoDoEvento(ev.id) : fechamentoDaAgenda(ag.mes, e.key);
-    var status = fch
-      ? '<span class="badge" style="background:rgba(225,6,0,.16);color:#ff8b8b;border:1px solid rgba(225,6,0,.4)">🔒 Fechado em '+fmtDT(fch.fechado_em)+'</span> <span class="muted" style="font-size:11.5px">'+totaisFech(fch).jornadas+' jornada(s) · '+fmtDuracao(totaisFech(fch).minutos*60000)+' · '+(fch.sync==='ok'?'☁ gravado no banco':'⚠ envio ao banco pendente')+((fch.adendos||[]).length?' · '+fch.adendos.length+' adendo(s)':'')+'</span>'
-      : ev
-      ? '<span class="badge ok">✓ conversa importada</span> <span class="muted" style="font-size:11.5px">'+compl+' jornada(s)'+(conf?' · <b style="color:var(--amber)">'+conf+' pra conferir</b>':'')+(falt.filter(function(x){return !x.logistica;}).length?' · <b style="color:var(--amber)">'+falt.filter(function(x){return !x.logistica;}).reduce(function(s,x){return s+x.nomes.length;},0)+' escalado(s) sem registro</b>':'')+'</span>'
-      : (e.nPessoas?'<span class="badge pend">aguardando conversa do WhatsApp</span>':'<span class="muted" style="font-size:11.5px">sem equipe escalada</span>');
-    var semVinculo = !ev ? STORE.eventos.filter(function(x){return !x.agendaRef;}) : [];
-    h+='<div class="card" style="padding:14px 16px">'
-      +'<div class="flex" style="justify-content:space-between;align-items:flex-start">'
-      +'<div style="flex:1;min-width:260px"><div style="font-weight:800;font-size:14.5px"><span class="evtag" style="margin-right:6px;color:var(--txt)">'+esc(e.uf)+'</span>'+esc(e.nome)+'</div>'
-      +'<div class="muted" style="font-size:11.5px;margin-top:4px">'+fmtDia(dias[0])+(dias.length>1?' → '+fmtDia(dias[dias.length-1]):'')+' · '+dias.length+' dia(s) · '+e.nPessoas+' pessoa(s) escalada(s)</div>'
-      +'<div style="margin-top:6px">'+status+'</div></div>'
-      +'<div class="flex">'
-      +(fch?'<button class="btn sm" onclick="FECH_SEL=\''+fch.id+'\';BANCO_MES=\''+fch.mes+'\';goTab(\'banco\')">🗄 Ver fechamento</button>':'')
-      +(ev&&!fch?'<button class="btn ghost sm" onclick="FILTRO_EV=\''+ev.id+'\';goTab(\'horarios\')">Ver jornadas</button>':'')
-      +(!fch&&(e.nPessoas||ev)?'<button class="btn sm'+(ev?' ghost':'')+'" onclick="subirConversaAgenda(\''+e.key+'\')">📎 '+(ev?'Atualizar':'Subir')+' conversa</button>':'')
-      +(ev&&!fch?'<button class="btn sm" style="background:#1b1d26;border:1px solid rgba(225,6,0,.5);box-shadow:none" onclick="fecharEvento(\''+ev.id+'\')">🔒 Fechar evento</button>':'')
-      +(semVinculo.length?'<select onchange="if(this.value)vincularEvento(this.value,\''+ag.mes+'|'+e.key+'\')" style="font-size:12px"><option value="">Já importei com outro nome…</option>'+semVinculo.map(function(x){return '<option value="'+x.id+'">'+esc(x.nome)+'</option>';}).join('')+'</select>':'')
-      +'</div></div>'
-      +'<div class="agdias">'+dias.map(function(d){
-          var n=(e.escala[d]||[]).length;
-          var nomes=(e.escala[d]||[]).map(function(id){return cad[id]?cad[id].nome:'';}).filter(Boolean).sort();
-          return '<div class="agdia" title="'+esc(nomes.join('\n')||'ninguém escalado')+'"><b>'+diaSemana(d+'T12:00:00').slice(0,3)+' '+d.slice(8)+'/'+d.slice(5,7)+'</b><span class="fase '+classeFase(e.dias[d])+'">'+esc(e.dias[d]||'—')+'</span><span class="muted">'+(n?'👥 '+n:'')+'</span></div>';
-        }).join('')+'</div>'
-      +(falt.length?'<div style="margin-top:8px;font-size:11.5px;line-height:1.6">'+falt.map(function(x){return x.logistica ? '<div class="muted">🚚 '+fmtDia(x.dia)+' ('+esc(x.fase)+') — dia de logística, '+x.nomes.length+' escalado(s) sem entrada/saída no grupo (normal)</div>' : '<div><b style="color:var(--amber)">⚠ '+fmtDia(x.dia)+' ('+esc(x.fase)+')</b> escalado(s) sem registro no grupo: '+esc(x.nomes.join(', '))+'</div>';}).join('')+'</div>':'')
+    var s=sits[e.key], dias=Object.keys(e.dias).sort(), aberto=AG_EXP===e.key;
+    var periodo=fmtDia(dias[0])+(dias.length>1?' – '+fmtDia(dias[dias.length-1]):'');
+    var pill, acao='';
+    if(s.st==='fechado'){
+      var tf=totaisFech(s.fch);
+      pill='<span class="pill p-ok">🔒 Fechado'+(s.fch.tipo==='sem_conversa'?' (sem conversa)':'')+(s.fch.ressalvas?' · ⚠ '+s.fch.ressalvas:'')+'</span>';
+      acao='<button class="btn ghost sm" onclick="event.stopPropagation();FECH_SEL=\''+s.fch.id+'\';BANCO_MES=\''+s.fch.mes+'\';goTab(\'banco\')">Ver</button>';
+    } else if(s.st==='conferencia'){
+      var ok=s.jor.filter(function(r){return r.durMs!=null;}).length;
+      pill='<span class="pill '+(s.pend?'p-warn':'p-blue')+'">'+(s.pend?'⚠ '+s.pend+' a conferir':'✓ pronto p/ fechar')+'</span>';
+      acao='<button class="btn ghost sm" onclick="event.stopPropagation();FILTRO_EV=\''+s.ev.id+'\';goTab(\'horarios\')">Conferir</button>'
+        +'<button class="btn sm" onclick="event.stopPropagation();fecharEvento(\''+s.ev.id+'\')">🔒 Fechar</button>';
+    } else {
+      pill='';
+      acao='<button class="btn ghost sm" onclick="event.stopPropagation();subirConversaAgenda(\''+e.key+'\')">📎 Subir conversa</button>'
+        +'<button class="btn ghost sm" title="Fechar sem conversa (evento pontual)" onclick="event.stopPropagation();abrirFecharSemConversa(\''+e.key+'\')">🔒</button>';
+    }
+    h+='<div class="agrow'+(aberto?' open':'')+'" onclick="AG_EXP=AG_EXP===\''+e.key+'\'?null:\''+e.key+'\';render()">'
+      +'<div class="agmain"><span class="ufb">'+esc(e.uf)+'</span><div style="min-width:0"><div class="agnome">'+esc(e.nome)+'</div>'
+      +'<div class="muted" style="font-size:11.5px">'+periodo+' · '+dias.length+' dia(s) · 👥 '+e.nPessoas+(s.st==='conferencia'?' · '+s.jor.length+' jornada(s)':'')+(s.st==='fechado'?' · '+fmtDuracao(totaisFech(s.fch).minutos*60000):'')+'</div></div></div>'
+      +'<div class="agside">'+pill+acao+'<span class="muted" style="font-size:11px;width:12px;text-align:center">'+(aberto?'▾':'▸')+'</span></div>'
       +'</div>';
+    if(aberto){
+      var falt = s.ev && s.st!=='fechado' ? faltasEscala(s.ev.id, s.jor) : [];
+      var semVinc = s.st==='afazer' ? STORE.eventos.filter(function(x){return !x.agendaRef && !fechamentoDoEvento(x.id);}) : [];
+      h+='<div class="agdet">'
+        +'<div class="agdias">'+dias.map(function(d){
+            var nomes=(e.escala[d]||[]).map(function(id){return cad[id]?cad[id].nome:'';}).filter(Boolean).sort();
+            return '<div class="agdia"><b>'+diaSemana(d+'T12:00:00').slice(0,3)+' '+fmtDia(d)+'</b><span class="fase '+classeFase(e.dias[d])+'">'+esc(e.dias[d]||'—')+'</span><span class="muted" style="font-size:10.5px;line-height:1.35">'+(nomes.length?esc(nomes.join(', ')):'ninguém escalado')+'</span></div>';
+          }).join('')+'</div>'
+        +(falt.length?'<div style="margin-top:8px;font-size:11.5px;line-height:1.6">'+falt.map(function(x){return x.logistica?'<div class="muted">🚚 '+fmtDia(x.dia)+' ('+esc(x.fase)+') — dia de logística, sem registro no grupo (normal)</div>':'<div><b style="color:var(--amber)">⚠ '+fmtDia(x.dia)+' ('+esc(x.fase)+')</b> escalado(s) sem registro: '+esc(x.nomes.join(', '))+'</div>';}).join('')+'</div>':'')
+        +(s.st==='conferencia'?'<div style="margin-top:8px"><button class="btn ghost sm" onclick="event.stopPropagation();subirConversaAgenda(\''+e.key+'\')">📎 Atualizar conversa</button></div>':'')
+        +(s.st==='afazer'?'<div style="margin-top:8px" class="flex"><button class="btn ghost sm" onclick="event.stopPropagation();abrirFecharSemConversa(\''+e.key+'\')">🔒 Fechar sem conversa (evento pontual)</button><span class="muted" style="font-size:11px">para evento que não precisa conferir horário pelo grupo</span></div>':'')
+        +(semVinc.length?'<div style="margin-top:8px"><select onclick="event.stopPropagation()" onchange="if(this.value)vincularEvento(this.value,\''+ag.mes+'|'+e.key+'\')" style="font-size:12px"><option value="">Já importei a conversa com outro nome…</option>'+semVinc.map(function(x){return '<option value="'+x.id+'">'+esc(x.nome)+'</option>';}).join('')+'</select></div>':'')
+        +'</div>';
+    }
   });
-  if(!lista.length) h+='<div class="card empty">Nenhum evento encontrado.</div>';
+  h+='</div>'+rodapeAgenda();
   return h;
+
+  function rodapeAgenda(){
+    return '<div class="flex muted" style="font-size:11.5px;justify-content:space-between;margin-top:4px">'
+      +'<span>'+esc(ag.arquivo)+' · lida em '+fmtDT(ag.importadoEm)+'</span>'
+      +'<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" '+(AG_TODOS?'checked':'')+' onchange="AG_TODOS=this.checked;render()" style="accent-color:var(--red)"> mostrar também eventos sem equipe (sublocação, visita…)</label></div>';
+  }
 }
-// Checklist em PDF dos eventos do mês (pra ir baixando as conversas do WhatsApp)
+
+// ---------- Fechar sem conversa (evento pontual) ----------
+var FSC_KEY=null;
+function abrirFecharSemConversa(key){
+  var ag=agendaAtual(); var e=ag && ag.eventos.find(function(x){return x.key===key;}); if(!e) return;
+  if(fechamentoDaAgenda(ag.mes,key)){ alert('Esse evento já está fechado.'); return; }
+  FSC_KEY=key;
+  var cad={}; STORE.colaboradores.forEach(function(c){cad[c.id]=c;});
+  var dias=Object.keys(e.dias).sort();
+  var o=document.getElementById('fscOv'); if(o) o.remove();
+  var h='<div class="modal" id="fscOv"><div class="card" style="max-width:620px">'
+    +'<div class="section-title" style="font-size:16px">🔒 Fechar sem conversa do grupo</div>'
+    +'<div style="font-weight:800;font-size:14px;margin-bottom:4px">'+esc(e.titulo)+'</div>'
+    +'<div class="muted" style="font-size:12px;line-height:1.55;margin-bottom:12px">Para evento pontual que não precisa conferir horário pelo WhatsApp. O fechamento grava a <b style="color:var(--txt)">escala da planilha</b> (quem estava em cada dia) e a sua observação — sem horas. Se depois precisar lançar horas, use um adendo.</div>'
+    +'<div class="tablewrap" style="margin-bottom:12px"><table><thead><tr><th>Dia</th><th>Fase</th><th>Escalados</th></tr></thead><tbody>'
+    +dias.map(function(d){ var n=(e.escala[d]||[]).map(function(id){return cad[id]?cad[id].nome:'';}).filter(Boolean); return '<tr><td><b>'+diaSemana(d+'T12:00:00').slice(0,3)+' '+fmtDia(d)+'</b></td><td><span class="fase '+classeFase(e.dias[d])+'">'+esc(e.dias[d]||'—')+'</span></td><td style="font-size:12px">'+(n.length?esc(n.join(', ')):'<span class="muted">ninguém escalado</span>')+'</td></tr>'; }).join('')
+    +'</tbody></table></div>'
+    +'<div class="flex" style="gap:6px;margin-bottom:6px">'+['Evento pontual de 1 dia, sem controle de horário pelo grupo.','Manutenção pontual — sem necessidade de conferir horas.','Atividade interna / visita técnica — sem horas extras.'].map(function(t){ return '<button class="btn ghost sm" onclick="document.getElementById(\'fscObs\').value=\''+t+'\'">'+t.split(' — ')[0].split(',')[0]+'</button>'; }).join('')+'</div>'
+    +'<label class="fl">Observação do fechamento <span style="color:var(--red)">*</span><textarea id="fscObs" rows="3">Evento pontual de 1 dia, sem controle de horário pelo grupo.</textarea></label>'
+    +'<div class="flex"><button class="btn" onclick="confirmarFecharSemConversa()">🔒 Fechar evento</button><button class="btn ghost" onclick="document.getElementById(\'fscOv\').remove()">Cancelar</button></div>'
+    +'</div></div>';
+  document.body.insertAdjacentHTML('beforeend', h);
+}
+function confirmarFecharSemConversa(){
+  var ag=agendaAtual(); var e=ag && ag.eventos.find(function(x){return x.key===FSC_KEY;}); if(!e) return;
+  var obs=(document.getElementById('fscObs').value||'').trim();
+  if(obs.length<3){ alert('Escreva uma observação para o fechamento.'); return; }
+  if(fechamentoDaAgenda(ag.mes,e.key)) return;
+  var cad={}; STORE.colaboradores.forEach(function(c){cad[c.id]=c;});
+  var dias=Object.keys(e.dias).sort();
+  var escala=dias.map(function(d){ return {dia:d, fase:e.dias[d]||'', nomes:(e.escala[d]||[]).map(function(id){return cad[id]?cad[id].nome:'';}).filter(Boolean)}; });
+  var pes={}; escala.forEach(function(x){ x.nomes.forEach(function(n){ pes[chaveNome(n)]=1; }); });
+  var f={ id:uuid(), versao_app:1, tipo:'sem_conversa', mes:ag.mes, evento_ref:ag.mes+'|'+e.key, evento_id:null, evento_nome:e.titulo, uf:e.uf,
+    inicio:dias[0], fim:dias[dias.length-1], fechado_em:new Date().toISOString(), fechado_por:'Mirthes',
+    jornadas:[], escala:escala, escalados_sem_registro:[], observacao_geral:obs, ressalvas:0,
+    totais:{jornadas:0, incompletas:0, pessoas:Object.keys(pes).length, minutos:0, minutos_acima_12h:0, acima_12h:0}, adendos:[], sync:'pendente' };
+  hashTexto(JSON.stringify(escala)+obs).then(function(hh){
+    f.hash=hh; STORE.fechamentos=STORE.fechamentos||[]; STORE.fechamentos.push(f);
+    var o=document.getElementById('fscOv'); if(o) o.remove();
+    salvar(); render();
+    sincronizarBanco(true).then(function(ok){ toast(ok?'🔒 Fechado sem conversa e gravado no banco':'🔒 Fechado (envio ao banco pendente)'); });
+  });
+}
+
 function pdfSafe(t){ return String(t==null?'':t).replace(/²/g,'2').replace(/³/g,'3').replace(/[\u2013\u2014]/g,'-').replace(/[\u2192]/g,'->').replace(/[^\x00-\xFF]/g,''); }
 function prepararDoc(doc){
   var _t=doc.text.bind(doc);
@@ -1151,37 +1249,45 @@ function hashTexto(txt){
   var h=0x811c9dc5; for(var i=0;i<txt.length;i++){ h^=txt.charCodeAt(i); h=(h*0x01000193)>>>0; }
   return Promise.resolve('fnv-'+h.toString(16));
 }
-function fecharEvento(evId){
+function fecharEvento(evId, opts){
   if(fechamentoDoEvento(evId)){ bloqueado(evId); return; }
   var ev=STORE.eventos.find(function(e){return e.id===evId;}); if(!ev) return;
   var p=pendenciasFechamento(evId), rows=p.rows;
   if(!rows.length){ alert('Esse evento não tem jornadas para fechar.'); return; }
-  if(p.avisos.length || p.pontuais.length){
-    alert('Ainda não dá para fechar "'+ev.nome+'":\n\n'+(p.avisos.length?'• '+p.avisos.length+' linha(s) com aviso do sistema (⚠)\n':'')+(p.pontuais.length?'• '+p.pontuais.length+' dúvida(s) pontual(is) aberta(s) com o operacional (❓)\n':'')+'\nResolva/valide essas linhas e tente de novo.');
-    FILTRO_EV=evId; VER=p.pontuais.length&&!p.avisos.length?'pontual':'conferir'; goTab('horarios'); return;
-  }
-  if(p.naoVal.length && !confirm(p.naoVal.length+' linha(s) estão OK mas ainda não foram validadas por você.\n\nValidar todas elas e continuar com o fechamento?')) return;
+  var faltasPend=faltasEscala(evId, rows).filter(function(x){return !x.logistica;});
+  if(!opts && (p.avisos.length || p.pontuais.length || faltasPend.length)){ abrirRessalvas(evId); return; }
+  opts=opts||{notas:{}, notasFaltas:{}, geral:''};
+  if(!opts.ressalvasOk && p.naoVal.length && !confirm(p.naoVal.length+' linha(s) estão OK mas ainda não foram validadas por você.\n\nValidar todas elas e continuar com o fechamento?')) return;
   p.naoVal.forEach(function(r){ marcaRev(r).rev={st:'validado', nota:'', em:new Date().toISOString(), auto:true}; });
   rows=montarJornadas(STORE.marcas.filter(function(m){return m.eventoId===evId;}));
   var ae=acharAgendaEvento(ev.agendaRef);
   var jornadas=ordenarPorDia(rows).map(function(r){
-    var e=tsDe(r.entrada), s=tsDe(r.saida);
+    var e=r.entrada?tsDe(r.entrada):null, s=r.saida?tsDe(r.saida):null;
+    var ok = r.durMs!=null && r.durMs>0;
+    var chave=chaveRessalva(r);
+    var pend = r.alertas.length>0 || (r.rev && r.rev.st==='pontual');
     return { dia:isoDia(tsDeRow(r)), fase:r.fase||'', nome:r.nome, colaborador_id:r.colab?r.colab.id:null, equipe:r.equipe||'',
-      nome_no_grupo:r.grafias.join(' / '), entrada:new Date(e).toISOString(), saida:new Date(s).toISOString(),
-      duracao_min:Math.round(r.durMs/60000), acima_12h_min:Math.max(0,Math.round((r.durMs-12*3600000)/60000)),
+      nome_no_grupo:r.grafias.join(' / '), entrada:e?new Date(e).toISOString():null, saida:s?new Date(s).toISOString():null,
+      duracao_min: ok?Math.round(r.durMs/60000):null, acima_12h_min: ok?Math.max(0,Math.round((r.durMs-12*3600000)/60000)):0,
+      situacao: !ok ? 'incompleta' : (pend ? 'com_ressalva' : 'ok'),
+      pendencias: pend ? r.alertas.map(function(x){ return x.replace(/\s*—\s*(preencha|resolva|corrija|vincule).*$/i,'').replace(/\s*Qual vale\?$/,''); }).concat(r.rev&&r.rev.st==='pontual'?['Dúvida com o operacional sem resposta']:[]) : [],
+      observacao: (opts.notas||{})[chave]||'',
       ajuste_manual:!!((r.entrada&&r.entrada.tsManual)||(r.saida&&r.saida.tsManual)),
       validacoes:r.validados.slice(), duvida:(r.rev&&r.rev.nota)||'', resposta:(r.rev&&r.rev.resposta)||'' };
   });
   var pes={}; jornadas.forEach(function(j){pes[chaveNome(j.nome)]=1;});
-  var totMin=jornadas.reduce(function(a,j){return a+j.duracao_min;},0), excMin=jornadas.reduce(function(a,j){return a+j.acima_12h_min;},0);
+  var totMin=jornadas.reduce(function(a,j){return a+(j.duracao_min||0);},0), excMin=jornadas.reduce(function(a,j){return a+j.acima_12h_min;},0);
+  var nRess=jornadas.filter(function(j){return j.situacao!=='ok';}).length;
   var mes=mesCompetencia(ev, rows);
   var dias=jornadas.map(function(j){return j.dia;}).sort();
   var resumo='Fechar "'+ev.nome+'"\n\nCompetência: '+MESES_NOME[+mes.slice(5)-1]+'/'+mes.slice(0,4)+'\n'+jornadas.length+' jornadas · '+Object.keys(pes).length+' pessoas · '+fmtDuracao(totMin*60000)+' trabalhadas\n\n🔒 Depois de fechado, NADA deste evento pode ser alterado — nem reimportando a conversa ou a planilha. Só será possível incluir ADENDOS (observação ou jornada esquecida), que ficam registrados com data e hora.\n\nConfirmar o fechamento?';
+  if(nRess || opts.geral) resumo=resumo.replace('\n\n🔒','\n\n⚠ Fechamento COM OBSERVAÇÕES: '+nRess+' jornada(s) com ressalva/incompleta(s)'+(faltasPend.length?' e '+faltasPend.reduce(function(s,x){return s+x.nomes.length;},0)+' escalado(s) sem registro':'')+' — as observações ficam gravadas no fechamento.\n\n🔒');
   if(!confirm(resumo)){ salvar(); render(); return; }
   var f={ id:uuid(), versao_app:1, mes:mes, evento_ref:ev.agendaRef||null, evento_id:ev.id, evento_nome:ev.nome,
     uf:ae?ae.uf:'', inicio:dias[0], fim:dias[dias.length-1], fechado_em:new Date().toISOString(), fechado_por:'Mirthes',
-    jornadas:jornadas, escalados_sem_registro: faltasEscala(evId, rows).filter(function(x){return !x.logistica;}).map(function(x){return {dia:x.dia, fase:x.fase, nomes:x.nomes};}),
-    totais:{jornadas:jornadas.length, pessoas:Object.keys(pes).length, minutos:totMin, minutos_acima_12h:excMin, acima_12h:jornadas.filter(function(j){return j.acima_12h_min>0;}).length},
+    jornadas:jornadas, escalados_sem_registro: faltasPend.map(function(x){ var obs={}; x.nomes.forEach(function(n){ var o=(opts.notasFaltas||{})[x.dia+'|'+n]; if(o) obs[n]=o; }); return {dia:x.dia, fase:x.fase, nomes:x.nomes, observacoes:obs}; }),
+    observacao_geral: opts.geral||'', ressalvas: nRess + faltasPend.reduce(function(s,x){return s+x.nomes.length;},0),
+    totais:{jornadas:jornadas.filter(function(j){return j.duracao_min!=null;}).length, incompletas:jornadas.filter(function(j){return j.duracao_min==null;}).length, pessoas:Object.keys(pes).length, minutos:totMin, minutos_acima_12h:excMin, acima_12h:jornadas.filter(function(j){return j.acima_12h_min>0;}).length},
     adendos:[], sync:'pendente' };
   hashTexto(JSON.stringify(f.jornadas)).then(function(h){
     f.hash=h;
@@ -1195,9 +1301,55 @@ function fecharEvento(evId){
 }
 function uuid(){ if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0;return (c==='x'?r:(r&3|8)).toString(16);}); }
+function chaveRessalva(r){ return chaveNome(r.nome)+'|'+(r.entrada?r.entrada.id:'-')+'|'+(r.saida?r.saida.id:'-'); }
+var RESS=null;
+function abrirRessalvas(evId){
+  var ev=STORE.eventos.find(function(e){return e.id===evId;});
+  var p=pendenciasFechamento(evId);
+  var itens=ordenarPorDia(p.rows).filter(function(r){ return r.alertas.length || (r.rev&&r.rev.st==='pontual'); });
+  var falt=faltasEscala(evId, p.rows).filter(function(x){return !x.logistica;});
+  RESS={evId:evId, itens:itens, falt:falt};
+  var fx=document.getElementById('ressOv'); if(fx) fx.remove();
+  var h='<div class="modal" id="ressOv"><div class="card" style="max-width:780px">'
+    +'<div class="section-title" style="font-size:16px">🔒 Fechar "'+esc(ev.nome)+'" com observações</div>'
+    +'<div class="muted" style="font-size:12px;line-height:1.55;margin-bottom:14px">Este evento ainda tem pendências. Você pode <b style="color:var(--txt)">voltar e resolver</b>, ou <b style="color:var(--txt)">fechar assim mesmo</b> registrando o motivo. Tudo o que escrever aqui fica gravado no fechamento (no banco de dados e no PDF) e o evento não fica mais pendente.</div>';
+  if(itens.length){
+    h+='<div style="font-weight:800;font-size:12.5px;margin:6px 0 8px">⚠ Jornadas com pendência ('+itens.length+')</div>';
+    itens.forEach(function(r,i){
+      var e=r.entrada?tsDe(r.entrada):null, s=r.saida?tsDe(r.saida):null;
+      var prob=r.alertas.slice(); if(r.rev&&r.rev.st==='pontual') prob.push('Dúvida com o operacional: '+(r.rev.nota||'sem resposta'));
+      h+='<div class="card" style="padding:10px 12px;margin-bottom:8px;background:rgba(255,176,32,.05)">'
+        +'<div class="flex" style="justify-content:space-between"><b>'+esc(r.nome)+'</b><span class="muted" style="font-size:11.5px">'+fmtDia(isoDia(tsDeRow(r)))+' · '+(e?fmtHora(e):'sem entrada')+' → '+(s?fmtHora(s):'sem saída')+(r.durMs!=null?' · '+fmtDuracao(r.durMs):'')+'</span></div>'
+        +'<div style="font-size:11px;color:var(--amber);margin:4px 0 6px">'+prob.map(esc).join('<br>')+'</div>'
+        +'<textarea id="rs_'+i+'" rows="2" placeholder="Observação (ex: colaborador não registrou a saída no grupo; considerar o horário informado pelo líder)" style="width:100%"></textarea></div>';
+    });
+  }
+  if(falt.length){
+    h+='<div style="font-weight:800;font-size:12.5px;margin:12px 0 8px">📋 Escalados na planilha sem nenhum registro no grupo</div>';
+    falt.forEach(function(x){ x.nomes.forEach(function(n){
+      h+='<div class="flex" style="margin-bottom:6px;align-items:flex-start"><div style="min-width:190px;font-size:12px"><b>'+esc(n)+'</b><div class="muted" style="font-size:11px">'+fmtDia(x.dia)+' · '+esc(x.fase)+'</div></div>'
+        +'<input data-falta="'+esc(x.dia+'|'+n)+'" placeholder="Observação (ex: faltou / trocado / trabalhou mas não registrou)" style="flex:1;min-width:200px"></div>';
+    }); });
+  }
+  h+='<label class="fl" style="margin-top:12px">Observação geral do fechamento <span style="color:var(--red)">*</span><textarea id="rsGeral" rows="3" placeholder="Ex: Fechado com ressalvas — a equipe não registrou todos os horários no grupo. Valores conferidos com o líder do evento."></textarea></label>'
+    +'<div class="flex" style="margin-top:6px"><button class="btn" onclick="confirmarRessalvas()">🔒 Fechar com estas observações</button><button class="btn ghost" onclick="fecharRessalvasIr()">Voltar e resolver</button></div>'
+    +'</div></div>';
+  document.body.insertAdjacentHTML('beforeend', h);
+}
+function fecharRessalvasIr(){ var o=document.getElementById('ressOv'); if(o) o.remove(); if(RESS){ FILTRO_EV=RESS.evId; VER='conferir'; goTab('horarios'); } }
+function confirmarRessalvas(){
+  if(!RESS) return;
+  var geral=(document.getElementById('rsGeral').value||'').trim();
+  if(geral.length<5){ alert('Escreva a observação geral do fechamento (o motivo de fechar com pendências).'); document.getElementById('rsGeral').focus(); return; }
+  var notas={}; RESS.itens.forEach(function(r,i){ var v=(document.getElementById('rs_'+i).value||'').trim(); notas[chaveRessalva(r)]=v||'(sem observação específica — ver observação geral)'; });
+  var nf={}; [].slice.call(document.querySelectorAll('#ressOv [data-falta]')).forEach(function(inp){ if(inp.value.trim()) nf[inp.getAttribute('data-falta')]=inp.value.trim(); });
+  var evId=RESS.evId; var o=document.getElementById('ressOv'); if(o) o.remove();
+  fecharEvento(evId, {notas:notas, notasFaltas:nf, geral:geral, ressalvasOk:false});
+}
+function durTxt(j){ return j.duracao_min==null ? 'incompleta' : fmtDuracao(j.duracao_min*60000); }
 function totaisFech(f){
   var t={jornadas:f.totais.jornadas, minutos:f.totais.minutos, acima:f.totais.minutos_acima_12h, adendosJ:0};
-  (f.adendos||[]).forEach(function(a){ if(a.tipo==='jornada' && a.dados){ t.jornadas++; t.adendosJ++; t.minutos+=a.dados.duracao_min; t.acima+=a.dados.acima_12h_min; } });
+  (f.adendos||[]).forEach(function(a){ if(a.tipo==='jornada' && a.dados){ t.jornadas++; t.adendosJ++; t.minutos+=(a.dados.duracao_min||0); t.acima+=a.dados.acima_12h_min; } });
   return t;
 }
 // Adendo: única forma de incluir algo num fechamento (nunca altera o original)
@@ -1333,9 +1485,9 @@ function renderBanco(){
     achados.sort(function(x,y){return x.j.entrada<y.j.entrada?-1:1;});
     if(!achados.length) h+='<div class="empty">Nenhuma jornada fechada com esse nome.</div>';
     else{
-      var tot=achados.reduce(function(s,x){return s+x.j.duracao_min;},0);
+      var tot=achados.reduce(function(s,x){return s+(x.j.duracao_min||0);},0);
       h+='<div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>Mês</th><th>Evento</th><th>Nome</th><th>Entrada</th><th>Saída</th><th>Jornada</th><th>Origem</th></tr></thead><tbody>'
-        +achados.map(function(x){ return '<tr><td>'+fmtMesCurto(x.f.mes)+'</td><td><a href="#" style="color:var(--txt)" onclick="FECH_SEL=\''+x.f.id+'\';BANCO_MES=\''+x.f.mes+'\';render();return false">'+esc(x.f.evento_nome)+'</a></td><td><b>'+esc(x.j.nome)+'</b></td><td>'+fmtDT(x.j.entrada)+'</td><td>'+fmtDT(x.j.saida)+'</td><td class="jorn">'+fmtDuracao(x.j.duracao_min*60000)+'</td><td>'+(x.ad?'<span class="badge pend">adendo '+fmtData(x.ad.criado_em)+'</span>':'<span class="badge ok">fechamento</span>')+'</td></tr>'; }).join('')
+        +achados.map(function(x){ return '<tr><td>'+fmtMesCurto(x.f.mes)+'</td><td><a href="#" style="color:var(--txt)" onclick="FECH_SEL=\''+x.f.id+'\';BANCO_MES=\''+x.f.mes+'\';render();return false">'+esc(x.f.evento_nome)+'</a></td><td><b>'+esc(x.j.nome)+'</b></td><td>'+(x.j.entrada?fmtDT(x.j.entrada):'—')+'</td><td>'+(x.j.saida?fmtDT(x.j.saida):'—')+'</td><td class="jorn">'+durTxt(x.j)+(x.j.observacao?'<div class="tag-dig" style="white-space:normal;color:#ffd27a">📝 '+esc(x.j.observacao)+'</div>':'')+'</td><td>'+(x.ad?'<span class="badge pend">adendo '+fmtData(x.ad.criado_em)+'</span>':'<span class="badge ok">fechamento</span>')+'</td></tr>'; }).join('')
         +'<tr class="dayhdr"><td colspan="5">Total de '+achados.length+' jornada(s)</td><td colspan="2">'+fmtDuracao(tot*60000)+'</td></tr></tbody></table></div>';
     }
   }
@@ -1348,7 +1500,7 @@ function renderBanco(){
   if(!BANCO_MES || !meses[BANCO_MES]) BANCO_MES=lm[0];
   h+='<div class="card"><div class="flex" style="justify-content:space-between"><div class="flex" style="gap:6px">'
     +lm.map(function(m){ var t=meses[m].reduce(function(s,f){return s+totaisFech(f).minutos;},0); return '<button class="btn ghost sm'+(m===BANCO_MES?' active':'')+'" onclick="BANCO_MES=\''+m+'\';FECH_SEL=null;render()">'+fmtMesCurto(m)+' <span class="muted">· '+meses[m].length+' evento(s) · '+fmtDuracao(t*60000)+'</span></button>'; }).join('')
-    +'</div><div class="flex"><button class="btn ghost sm" onclick="baixarMesExcel(\''+BANCO_MES+'\')">📊 Excel do mês</button><button class="btn ghost sm" onclick="exportarBackup()">💾 Backup completo (.json)</button><button class="btn ghost sm" onclick="document.getElementById(\'upBackup\').click()">♻ Restaurar backup</button></div></div></div>';
+    +'</div><div class="flex"><button class="btn sm" onclick="baixarRelatorioDiretoria(\''+BANCO_MES+'\')">📈 Relatório da diretoria (PDF)</button><button class="btn ghost sm" onclick="baixarMesExcel(\''+BANCO_MES+'\')">📊 Excel do mês</button><button class="btn ghost sm" onclick="exportarBackup()">💾 Backup completo (.json)</button><button class="btn ghost sm" onclick="document.getElementById(\'upBackup\').click()">♻ Restaurar backup</button></div></div></div>';
 
   if(FECH_SEL){ var fsel=fs.find(function(f){return f.id===FECH_SEL;}); if(fsel) return h+renderFechamentoDetalhe(fsel); }
 
@@ -1356,7 +1508,7 @@ function renderBanco(){
   h+='<div class="card"><div class="section-title">'+fmtMesCurto(BANCO_MES).toUpperCase()+' — eventos fechados <span class="n">'+doMes.length+'</span></div><div class="tablewrap"><table><thead><tr><th>Evento</th><th>Período</th><th>Fechado em</th><th>Pessoas</th><th>Jornadas</th><th>Total de horas</th><th>Adendos</th><th>Banco</th><th></th></tr></thead><tbody>';
   doMes.forEach(function(f){
     var t=totaisFech(f), sok=f.sync==='ok' && !(f.adendos||[]).some(function(a){return a.sync!=='ok';});
-    h+='<tr><td><b>'+esc(f.evento_nome)+'</b></td><td>'+fmtDia(f.inicio)+(f.fim!==f.inicio?' a '+fmtDia(f.fim):'')+'</td><td>'+fmtDT(f.fechado_em)+'</td><td>'+f.totais.pessoas+'</td><td>'+t.jornadas+'</td><td class="jorn">'+fmtDuracao(t.minutos*60000)+'</td>'
+    h+='<tr><td><b>'+esc(f.evento_nome)+'</b>'+(f.ressalvas?' <span class="badge pend" title="Fechado com observações">⚠ '+f.ressalvas+'</span>':'')+(f.tipo==='sem_conversa'?' <span class="badge" style="background:rgba(79,140,255,.14);color:#7aa8ff;border:1px solid rgba(79,140,255,.35)">sem conversa</span>':'')+'</td><td>'+fmtDia(f.inicio)+(f.fim!==f.inicio?' a '+fmtDia(f.fim):'')+'</td><td>'+fmtDT(f.fechado_em)+'</td><td>'+f.totais.pessoas+'</td><td>'+t.jornadas+'</td><td class="jorn">'+fmtDuracao(t.minutos*60000)+'</td>'
       +'<td>'+((f.adendos||[]).length?'<span class="badge pend">'+f.adendos.length+'</span>':'—')+'</td>'
       +'<td>'+(sok?'<span class="badge ok">☁ gravado</span>':'<span class="badge pend">pendente</span>')+'</td>'
       +'<td><div class="flex" style="gap:4px;flex-wrap:nowrap"><button class="btn ghost sm" onclick="FECH_SEL=\''+f.id+'\';render()">Abrir</button><button class="btn ghost sm" onclick="baixarFechamentoPDF(\''+f.id+'\')">📄</button></div></td></tr>';
@@ -1372,24 +1524,33 @@ function renderFechamentoDetalhe(f){
     +'<div><a href="#" class="muted" style="font-size:12px" onclick="FECH_SEL=null;render();return false">← voltar para '+fmtMesCurto(f.mes)+'</a>'
     +'<div style="font-weight:800;font-size:17px;margin-top:6px">🔒 '+esc(f.evento_nome)+'</div>'
     +'<div class="muted" style="font-size:12px;margin-top:4px">Competência '+fmtMesCurto(f.mes)+' · '+fmtDia(f.inicio)+' a '+fmtDia(f.fim)+' · fechado em '+fmtDT(f.fechado_em)+' por '+esc(f.fechado_por||'')+'</div>'
+    +(f.ressalvas?'<div style="margin-top:6px"><span class="badge pend">⚠ fechado com observações · '+f.ressalvas+' ressalva(s)</span></div>':'')
     +'<div class="muted" style="font-size:10.5px;margin-top:4px">Código de integridade: <code>'+esc((f.hash||'').slice(0,16))+'</code> · '+(f.sync==='ok'?'☁ gravado no banco':'⚠ envio ao banco pendente')+'</div></div>'
     +'<div class="flex"><button class="btn" onclick="baixarFechamentoPDF(\''+f.id+'\')">📄 PDF do fechamento</button></div></div>'
     +'<div class="kpis" style="margin:14px 0 0"><div class="card kpi"><div class="eye">Pessoas</div><div class="big">'+f.totais.pessoas+'</div></div>'
-    +'<div class="card kpi"><div class="eye">Jornadas</div><div class="big">'+t.jornadas+'</div>'+(t.adendosJ?'<div class="desc">'+t.adendosJ+' por adendo</div>':'')+'</div>'
-    +'<div class="card kpi hero"><div class="eye">Total de horas</div><div class="big">'+fmtDuracao(t.minutos*60000)+'</div></div>'
+    +'<div class="card kpi"><div class="eye">Jornadas</div><div class="big">'+t.jornadas+'</div>'+(t.adendosJ?'<div class="desc">'+t.adendosJ+' por adendo</div>':'')+(f.totais.incompletas?'<div class="desc" style="color:var(--amber)">+ '+f.totais.incompletas+' incompleta(s)</div>':'')+'</div>'
+    +'<div class="card kpi hero"><div class="eye">Total de horas</div><div class="big">'+(f.tipo==='sem_conversa'&&!t.minutos?'—':fmtDuracao(t.minutos*60000))+'</div>'+(f.tipo==='sem_conversa'?'<div class="desc">fechado sem conversa</div>':'')+'</div>'
     +'<div class="card kpi"><div class="eye">Além de 12h (soma)</div><div class="big">'+fmtDuracao(t.acima*60000)+'</div></div></div></div>';
+  if(f.tipo==='sem_conversa'){
+    h+='<div class="card" style="border-left:3px solid var(--blue)"><div class="section-title">📝 Fechado sem conversa do grupo</div><div style="font-size:13px;line-height:1.55;white-space:pre-wrap">'+esc(f.observacao_geral||'')+'</div></div>';
+    h+='<div class="card"><div class="section-title">Escala registrada (da planilha do mês)</div><div class="tablewrap"><table><thead><tr><th>Dia</th><th>Fase</th><th>Escalados</th></tr></thead><tbody>'
+      +(f.escala||[]).map(function(x){ return '<tr><td><b>'+diaSemana(x.dia+'T12:00:00')+', '+fmtDia(x.dia)+'</b></td><td><span class="fase '+classeFase(x.fase)+'">'+esc(x.fase||'—')+'</span></td><td>'+esc(x.nomes.join(', ')||'—')+'</td></tr>'; }).join('')
+      +'</tbody></table></div></div>';
+  } else {
+  if(f.observacao_geral) h+='<div class="card" style="border-left:3px solid var(--amber)"><div class="section-title">📝 Observação geral do fechamento</div><div style="font-size:13px;line-height:1.55;white-space:pre-wrap">'+esc(f.observacao_geral)+'</div></div>';
   h+='<div class="card"><div class="section-title">Jornadas fechadas (somente leitura)</div><div class="tablewrap"><table><thead><tr><th>Nome</th><th>Equipe / fase</th><th>Entrada</th><th>Saída</th><th>Jornada</th><th>Observações</th></tr></thead><tbody>';
   var dia=null;
   f.jornadas.forEach(function(j){
     if(j.dia!==dia){ dia=j.dia; var dd=f.jornadas.filter(function(x){return x.dia===dia;});
-      h+='<tr class="dayhdr"><td colspan="6">📅 '+diaSemana(dia+'T12:00:00')+', '+fmtDia(dia)+'/'+dia.slice(0,4)+'<span class="dstat">'+dd.length+' jornada(s) · '+fmtDuracao(dd.reduce(function(s,x){return s+x.duracao_min;},0)*60000)+'</span>'+(j.fase?' <span class="fase '+classeFase(j.fase)+'">'+esc(j.fase)+'</span>':'')+'</td></tr>'; }
-    h+='<tr><td><b>'+esc(j.nome)+'</b><div class="tag-dig">no grupo: '+esc(j.nome_no_grupo)+'</div></td><td class="muted" style="font-size:11.5px">'+esc(j.equipe||'—')+'</td><td>'+fmtDT(j.entrada)+'</td><td>'+fmtDT(j.saida)+'</td>'
-      +'<td><span class="jorn">'+fmtDuracao(j.duracao_min*60000)+'</span>'+(j.acima_12h_min?' <span class="badge dobra">+'+fmtDuracao(j.acima_12h_min*60000)+'</span>':'')+'</td>'
-      +'<td style="font-size:11px;max-width:260px">'+(j.ajuste_manual?'<div class="tag-dig man">✎ horário ajustado na conferência</div>':'')+j.validacoes.map(function(v){return '<div class="valid">✓ '+esc(v)+'</div>';}).join('')+(j.duvida?'<div class="tag-dig" style="white-space:normal">❓ '+esc(j.duvida)+(j.resposta?' → '+esc(j.resposta):'')+'</div>':'')+'</td></tr>';
+      h+='<tr class="dayhdr"><td colspan="6">📅 '+diaSemana(dia+'T12:00:00')+', '+fmtDia(dia)+'/'+dia.slice(0,4)+'<span class="dstat">'+dd.length+' jornada(s) · '+fmtDuracao(dd.reduce(function(s,x){return s+(x.duracao_min||0);},0)*60000)+'</span>'+(j.fase?' <span class="fase '+classeFase(j.fase)+'">'+esc(j.fase)+'</span>':'')+'</td></tr>'; }
+    h+='<tr'+(j.situacao&&j.situacao!=='ok'?' class="orfa"':'')+'><td><b>'+esc(j.nome)+'</b><div class="tag-dig">no grupo: '+esc(j.nome_no_grupo)+'</div></td><td class="muted" style="font-size:11.5px">'+esc(j.equipe||'—')+'</td><td>'+(j.entrada?fmtDT(j.entrada):'<span style="color:var(--amber)">sem registro</span>')+'</td><td>'+(j.saida?fmtDT(j.saida):'<span style="color:var(--amber)">sem registro</span>')+'</td>'
+      +'<td><span class="jorn">'+durTxt(j)+'</span>'+(j.acima_12h_min?' <span class="badge dobra">+'+fmtDuracao(j.acima_12h_min*60000)+'</span>':'')+'</td>'
+      +'<td style="font-size:11px;max-width:260px">'+((j.pendencias||[]).length?'<div class="falta" style="font-weight:600">⚠ '+esc(j.pendencias.join(' / '))+'</div>':'')+(j.observacao?'<div style="color:#ffd27a;margin:2px 0">📝 '+esc(j.observacao)+'</div>':'')+(j.ajuste_manual?'<div class="tag-dig man">✎ horário ajustado na conferência</div>':'')+j.validacoes.map(function(v){return '<div class="valid">✓ '+esc(v)+'</div>';}).join('')+(j.duvida?'<div class="tag-dig" style="white-space:normal">❓ '+esc(j.duvida)+(j.resposta?' → '+esc(j.resposta):'')+'</div>':'')+'</td></tr>';
   });
   h+='</tbody></table></div></div>';
   if(f.escalados_sem_registro && f.escalados_sem_registro.length)
-    h+='<div class="card"><div class="section-title">Escalados sem registro no grupo (no momento do fechamento)</div>'+f.escalados_sem_registro.map(function(x){return '<div style="font-size:12.5px;margin-bottom:4px"><b>'+fmtDia(x.dia)+'</b> '+esc(x.fase)+' — '+esc(x.nomes.join(', '))+'</div>';}).join('')+'</div>';
+    h+='<div class="card"><div class="section-title">Escalados sem registro no grupo (no momento do fechamento)</div>'+f.escalados_sem_registro.map(function(x){return '<div style="font-size:12.5px;margin-bottom:6px"><b>'+fmtDia(x.dia)+'</b> '+esc(x.fase)+' — '+x.nomes.map(function(n){ var o=(x.observacoes||{})[n]; return esc(n)+(o?' <span style="color:#ffd27a">📝 '+esc(o)+'</span>':''); }).join(', ')+'</div>';}).join('')+'</div>';
+  }
   // adendos
   h+='<div class="card" style="border-top:3px solid var(--amber)"><div class="section-title">➕ Adendos <span class="n" style="background:var(--amber);color:#111">'+(f.adendos||[]).length+'</span></div>'
     +'<div class="muted" style="font-size:11.5px;margin-bottom:10px">O fechamento original nunca muda. Se precisar incluir algo (uma observação ou uma jornada que ficou de fora), registre um adendo — ele fica gravado com data e hora, também de forma permanente.</div>';
@@ -1417,20 +1578,35 @@ function baixarFechamentoPDF(fid){
   var body=[], dia=null;
   f.jornadas.forEach(function(j){
     if(j.dia!==dia){ dia=j.dia; var dd=f.jornadas.filter(function(x){return x.dia===dia;});
-      body.push([{content:diaSemana(dia+'T12:00:00')+', '+fmtDia(dia)+'/'+dia.slice(0,4)+(j.fase?'  ·  '+j.fase:''), colSpan:5, styles:{fillColor:C.cinza, fontStyle:'bold'}},{content:fmtDuracao(dd.reduce(function(s,x){return s+x.duracao_min;},0)*60000), colSpan:2, styles:{fillColor:C.cinza, fontStyle:'bold', halign:'right'}}]); }
-    var obs=[]; if(j.ajuste_manual) obs.push('horário ajustado na conferência'); if(j.duvida) obs.push('dúvida: '+j.duvida+(j.resposta?' -> '+j.resposta:''));
-    body.push([j.nome, j.equipe||'—', fmtDia(isoDia(j.entrada))+' '+fmtHora(j.entrada), fmtDia(isoDia(j.saida))+' '+fmtHora(j.saida),
-      {content:fmtDuracao(j.duracao_min*60000),styles:{fontStyle:'bold',halign:'right'}}, {content:j.acima_12h_min?'+'+fmtDuracao(j.acima_12h_min*60000):'',styles:{textColor:C.verm,fontStyle:'bold',halign:'right'}}, {content:obs.join(' / ')||'Validado',styles:{fontSize:6.8,textColor:C.mut}}]);
+      body.push([{content:diaSemana(dia+'T12:00:00')+', '+fmtDia(dia)+'/'+dia.slice(0,4)+(j.fase?'  ·  '+j.fase:''), colSpan:5, styles:{fillColor:C.cinza, fontStyle:'bold'}},{content:fmtDuracao(dd.reduce(function(s,x){return s+(x.duracao_min||0);},0)*60000), colSpan:2, styles:{fillColor:C.cinza, fontStyle:'bold', halign:'right'}}]); }
+    var obs=[]; if((j.pendencias||[]).length) obs.push('Pendência: '+j.pendencias.join(' / ')); if(j.observacao) obs.push('Obs.: '+j.observacao); if(j.ajuste_manual) obs.push('horário ajustado na conferência'); if(j.duvida) obs.push('dúvida: '+j.duvida+(j.resposta?' -> '+j.resposta:''));
+    var ress=j.situacao && j.situacao!=='ok';
+    body.push([j.nome, j.equipe||'—', j.entrada?fmtDia(isoDia(j.entrada))+' '+fmtHora(j.entrada):'sem registro', j.saida?fmtDia(isoDia(j.saida))+' '+fmtHora(j.saida):'sem registro',
+      {content:j.duracao_min==null?'—':durTxt(j),styles:{fontStyle:'bold',halign:'right'}}, {content:j.acima_12h_min?'+'+fmtDuracao(j.acima_12h_min*60000):'',styles:{textColor:C.verm,fontStyle:'bold',halign:'right'}}, {content:obs.join(' / ')||'Validado',styles:{fontSize:6.8,textColor:ress?C.verm:C.mut}}]);
   });
+  if(f.tipo==='sem_conversa'){
+    pdfTabela(doc,{startY:54, head:[['Dia','Fase','Escalados (planilha do mês)']], body:(f.escala||[]).map(function(x){ return [diaSemana(x.dia+'T12:00:00')+', '+fmtDia(x.dia)+'/'+x.dia.slice(0,4), x.fase||'—', x.nomes.join(', ')||'—']; }),
+      columnStyles:{0:{cellWidth:44,fontStyle:'bold'},1:{cellWidth:40},2:{cellWidth:'auto'}}, didDrawPage:function(){cab();}});
+  } else
   pdfTabela(doc,{startY:54, head:[['Nome','Equipe','Entrada','Saída','Jornada','+12h','Observação']], body:body,
     columnStyles:{0:{cellWidth:42},1:{cellWidth:30},2:{cellWidth:21},3:{cellWidth:21},4:{cellWidth:15},5:{cellWidth:14},6:{cellWidth:'auto'}}, didDrawPage:function(){cab();}});
+  if(f.observacao_geral || (f.escalados_sem_registro||[]).length){
+    var y0=doc.lastAutoTable.finalY+10; if(y0>240){ doc.addPage(); cab(); y0=42; }
+    doc.setFont('helvetica','bold'); doc.setFontSize(10.5); doc.setTextColor(C.txt[0],C.txt[1],C.txt[2]); doc.text('Observações do fechamento', 13, y0);
+    var lo=[]; if(f.observacao_geral) lo.push([f.tipo==='sem_conversa'?'Fechado sem conversa':'Geral', f.observacao_geral]);
+    (f.escalados_sem_registro||[]).forEach(function(x){ x.nomes.forEach(function(n){ lo.push([fmtDia(x.dia)+' · '+n, 'Escalado sem registro no grupo'+((x.observacoes||{})[n]?': '+x.observacoes[n]:'')]); }); });
+    pdfTabela(doc,{startY:y0+3, head:[['Item','Observação']], body:lo, columnStyles:{0:{cellWidth:48,fontStyle:'bold'},1:{cellWidth:'auto'}}, didDrawPage:function(){cab();}});
+  }
   if((f.adendos||[]).length){
     var y=doc.lastAutoTable.finalY+10; if(y>250){ doc.addPage(); cab(); y=42; }
     doc.setFont('helvetica','bold'); doc.setFontSize(10.5); doc.setTextColor(C.txt[0],C.txt[1],C.txt[2]); doc.text('Adendos', 13, y);
     pdfTabela(doc,{startY:y+3, head:[['Data','Tipo','Detalhe']], body:f.adendos.map(function(a){ return [fmtDT(a.criado_em), a.tipo==='jornada'?'Jornada incluída':'Observação', (a.tipo==='jornada'&&a.dados?a.dados.nome+': '+fmtDT(a.dados.entrada)+' -> '+fmtDT(a.dados.saida)+' = '+fmtDuracao(a.dados.duracao_min*60000)+'\n':'')+a.texto]; }),
       columnStyles:{0:{cellWidth:30},1:{cellWidth:30},2:{cellWidth:'auto'}}, didDrawPage:function(){cab();}});
   }
-  pdfQuadroTotal(doc, [['Jornadas', t.jornadas], ['Jornadas acima de 12h', f.totais.acima_12h], ['Horas além de 12h (soma)', fmtDuracao(t.acima*60000), true], ['Adendos', (f.adendos||[]).length, false, true]],
+  if(f.tipo==='sem_conversa' && !t.minutos){
+    pdfQuadroTotal(doc, [['Pessoas escaladas', f.totais.pessoas], ['Dias', (f.escala||[]).length], ['Adendos', (f.adendos||[]).length, false, true]], 'SEM CONTROLE DE HORAS', '—', 'evento pontual fechado sem conversa do grupo · registro imutável');
+  } else
+  pdfQuadroTotal(doc, [['Jornadas completas', t.jornadas]].concat(f.totais.incompletas?[['Jornadas incompletas (sem registro)', f.totais.incompletas]]:[]).concat([['Jornadas acima de 12h', f.totais.acima_12h], ['Horas além de 12h (soma)', fmtDuracao(t.acima*60000), true], ['Adendos', (f.adendos||[]).length, false, true]]).concat(f.ressalvas?[['Ressalvas registradas', f.ressalvas, false, true]]:[]),
     'TOTAL DE HORAS', fmtDuracao(t.minutos*60000), 'registro fechado e imutável · inclui jornadas de adendos');
   pdfRodape(doc);
   doc.save(('fechamento_'+f.mes+'_'+f.evento_nome).replace(/[^\wÀ-ú-]+/g,'_')+'.pdf');
@@ -1442,8 +1618,9 @@ function baixarMesExcel(mes){
   var a=[['Competência','Evento','Dia','Fase','Nome','Equipe','Entrada','Saída','Jornada','Além de 12h','Origem','Observação','Fechado em']];
   var pes={};
   fs.forEach(function(f){
-    f.jornadas.forEach(function(j){ a.push([fmtMesCurto(mes), f.evento_nome, fmtData(j.dia+'T12:00:00'), j.fase, j.nome, j.equipe, fmtDT(j.entrada), fmtDT(j.saida), dur(j.duracao_min), j.acima_12h_min?dur(j.acima_12h_min):'', 'Fechamento', (j.duvida?'Dúvida: '+j.duvida+(j.resposta?' -> '+j.resposta:''):''), fmtDT(f.fechado_em)]);
-      var k=chaveNome(j.nome); var p=pes[k]=pes[k]||{nome:j.nome, equipe:j.equipe, n:0, min:0, exc:0, ev:{}}; p.n++; p.min+=j.duracao_min; p.exc+=j.acima_12h_min; p.ev[f.evento_nome]=1; });
+    f.jornadas.forEach(function(j){ var ob=[]; if((j.pendencias||[]).length) ob.push('Pendência: '+j.pendencias.join(' / ')); if(j.observacao) ob.push('Obs.: '+j.observacao); if(j.duvida) ob.push('Dúvida: '+j.duvida+(j.resposta?' -> '+j.resposta:''));
+      a.push([fmtMesCurto(mes), f.evento_nome, fmtData(j.dia+'T12:00:00'), j.fase, j.nome, j.equipe, j.entrada?fmtDT(j.entrada):'sem registro', j.saida?fmtDT(j.saida):'sem registro', j.duracao_min==null?'incompleta':dur(j.duracao_min), j.acima_12h_min?dur(j.acima_12h_min):'', j.situacao==='com_ressalva'?'Fechamento (com ressalva)':(j.situacao==='incompleta'?'Fechamento (incompleta)':'Fechamento'), ob.join(' | '), fmtDT(f.fechado_em)]);
+      var k=chaveNome(j.nome); var p=pes[k]=pes[k]||{nome:j.nome, equipe:j.equipe, n:0, min:0, exc:0, ev:{}}; p.n++; p.min+=(j.duracao_min||0); p.exc+=j.acima_12h_min; p.ev[f.evento_nome]=1; });
     (f.adendos||[]).forEach(function(ad){ if(ad.tipo!=='jornada'||!ad.dados) return; var j=ad.dados;
       a.push([fmtMesCurto(mes), f.evento_nome, fmtData(j.dia+'T12:00:00'), '', j.nome, j.equipe, fmtDT(j.entrada), fmtDT(j.saida), dur(j.duracao_min), j.acima_12h_min?dur(j.acima_12h_min):'', 'Adendo '+fmtDT(ad.criado_em), ad.texto, fmtDT(f.fechado_em)]);
       var k=chaveNome(j.nome); var p=pes[k]=pes[k]||{nome:j.nome, equipe:j.equipe, n:0, min:0, exc:0, ev:{}}; p.n++; p.min+=j.duracao_min; p.exc+=j.acima_12h_min; p.ev[f.evento_nome]=1; });
@@ -1455,9 +1632,9 @@ function baixarMesExcel(mes){
   Object.keys(pes).map(function(k){return pes[k];}).sort(function(x,y){return x.nome.localeCompare(y.nome,'pt-BR');}).forEach(function(p){ b.push([p.nome,p.equipe,Object.keys(p.ev).join(' / '),p.n,dur(p.min),dur(p.exc)]); });
   var w2=XLSX.utils.aoa_to_sheet(b); w2['!cols']=[{wch:28},{wch:18},{wch:50},{wch:9},{wch:14},{wch:16}];
   XLSX.utils.book_append_sheet(wb, w2, 'Total por pessoa');
-  var c=[['Evento','Período','Fechado em','Pessoas','Jornadas','Total de horas','Adendos','Código']];
-  fs.forEach(function(f){ var t=totaisFech(f); c.push([f.evento_nome, fmtDia(f.inicio)+' a '+fmtDia(f.fim), fmtDT(f.fechado_em), f.totais.pessoas, t.jornadas, dur(t.minutos), (f.adendos||[]).length, (f.hash||'').slice(0,16)]); });
-  var w3=XLSX.utils.aoa_to_sheet(c); w3['!cols']=[{wch:32},{wch:14},{wch:16},{wch:9},{wch:9},{wch:14},{wch:9},{wch:18}];
+  var c=[['Evento','Período','Fechamento','Fechado em','Pessoas','Jornadas','Total de horas','Adendos','Ressalvas','Observação geral','Código']];
+  fs.forEach(function(f){ var t=totaisFech(f); c.push([f.evento_nome, fmtDia(f.inicio)+' a '+fmtDia(f.fim), f.tipo==='sem_conversa'?'Sem conversa (escala)':(f.ressalvas?'Com observações':'Normal'), fmtDT(f.fechado_em), f.totais.pessoas, t.jornadas, dur(t.minutos), (f.adendos||[]).length, f.ressalvas||0, f.observacao_geral||'', (f.hash||'').slice(0,16)]); });
+  var w3=XLSX.utils.aoa_to_sheet(c); w3['!cols']=[{wch:32},{wch:14},{wch:20},{wch:16},{wch:9},{wch:9},{wch:14},{wch:9},{wch:10},{wch:50},{wch:18}];
   XLSX.utils.book_append_sheet(wb, w3, 'Eventos do mês');
   XLSX.writeFile(wb, 'fechamentos_'+mes+'.xlsx');
 }
@@ -1474,7 +1651,7 @@ function estadoParaBanco(){
 }
 function aplicarEstado(d){
   APLICANDO_REMOTO=true;
-  STORE.eventos=d.eventos||[]; STORE.marcas=d.marcas||[]; STORE.financeiro=d.financeiro||[]; STORE.colaboradores=d.colaboradores||[];
+  STORE.eventos=d.eventos||[]; STORE.marcas=d.marcas||[]; STORE.financeiro=[]; STORE.colaboradores=d.colaboradores||[];
   STORE.agendas=d.agendas||{}; if(typeof d.apelidos==='string') STORE.apelidos=d.apelidos; if(d.horaBase) STORE.horaBase=d.horaBase; if(d.visao) STORE.visao=d.visao;
   salvar(); APLICANDO_REMOTO=false;
 }
@@ -1583,6 +1760,105 @@ function entrar(email, senha){
   });
 }
 function entrarLogin(){ entrar(document.getElementById('loginEmail').value.trim(), document.getElementById('loginSenha').value); }
+
+/* ============ RELATÓRIO MENSAL PARA A DIRETORIA (1 página) ============ */
+function mesAnterior(m){ var y=+m.slice(0,4), mo=+m.slice(5,7)-1; if(mo<1){mo=12;y--;} return y+'-'+pad2(mo); }
+function dadosMes(mes){
+  var fs=(STORE.fechamentos||[]).filter(function(f){return f.mes===mes;});
+  var pes={}, horas={}, min=0, exc=0, acima=0, jorn=0, incompl=0, ress=0, adend=0, semConv=0;
+  function soma(nome, m){ var k=chaveNome(nome); pes[k]=nome; horas[k]=(horas[k]||{nome:nome,min:0,dias:0}); horas[k].min+=m||0; horas[k].dias++; }
+  fs.forEach(function(f){
+    var t=totaisFech(f); min+=t.minutos; exc+=t.acima; jorn+=t.jornadas; incompl+=(f.totais.incompletas||0); ress+=(f.ressalvas||0); adend+=(f.adendos||[]).length;
+    if(f.tipo==='sem_conversa') semConv++;
+    f.jornadas.forEach(function(j){ soma(j.nome, j.duracao_min); if(j.acima_12h_min>0) acima++; });
+    (f.adendos||[]).forEach(function(a){ if(a.tipo==='jornada'&&a.dados){ soma(a.dados.nome, a.dados.duracao_min); if(a.dados.acima_12h_min>0) acima++; } });
+    (f.escala||[]).forEach(function(x){ x.nomes.forEach(function(n){ pes[chaveNome(n)]=n; }); });
+  });
+  var ag=(STORE.agendas||{})[mes], comEquipe=ag?ag.eventos.filter(function(e){return e.nPessoas;}):[];
+  var abertos=comEquipe.filter(function(e){ return !fechamentoDaAgenda(mes,e.key) && !fs.some(function(f){return f.evento_ref===mes+'|'+e.key;}); });
+  return {fs:fs, pessoas:Object.keys(pes).length, min:min, exc:exc, acima:acima, jorn:jorn, incompl:incompl, ress:ress, adend:adend, semConv:semConv,
+    totalEventos: ag?comEquipe.length:fs.length, abertos:abertos,
+    top:Object.keys(horas).map(function(k){return horas[k];}).sort(function(a,b){return b.min-a.min;}).slice(0,5)};
+}
+function baixarRelatorioDiretoria(mes){
+  mes = mes || BANCO_MES || AGENDA_MES;
+  if(!mes){ alert('Ainda não há mês com dados.'); return; }
+  if(!window.jspdf || !window.jspdf.jsPDF || !window.jspdf.jsPDF.API.autoTable){ alert('Não consegui carregar o gerador de PDF (sem internet?).'); return; }
+  var D=dadosMes(mes), A=dadosMes(mesAnterior(mes));
+  if(!D.fs.length && !D.totalEventos){ alert('Nenhum evento nesse mês.'); return; }
+  var doc=novoPDF(), C=PDF_COR, W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight();
+  var ult=new Date(+mes.slice(0,4), +mes.slice(5,7), 0).getDate();
+  pdfCabecalho(doc, 'Relatório Mensal · Eventos e Jornadas', 'Competência: '+fmtMesCurto(mes), 'Emitido em '+fmtDT(new Date()));
+  pdfTitulo(doc, fmtMesCurto(mes).toUpperCase(), 'Resumo para a Diretoria  ·  período 01 a '+ult+'/'+mes.slice(5,7)+'/'+mes.slice(0,4)+'  ·  fonte: fechamentos registrados no banco de dados', 43);
+
+  // ---- 4 indicadores
+  function varTxt(a,b,fmt){ if(!A.fs.length) return 'sem mês anterior para comparar'; var d=a-b; if(d===0) return 'igual ao mês anterior'; return (d>0?'+':'−')+fmt(Math.abs(d))+' vs '+MESES_NOME[+mesAnterior(mes).slice(5,7)-1]; }
+  var kp=[
+    {eye:'EVENTOS FECHADOS', big:D.fs.length+' de '+D.totalEventos, desc:D.abertos.length?D.abertos.length+' ainda em aberto':'mês completo', hero:false},
+    {eye:'TOTAL DE HORAS', big:fmtDuracao(D.min*60000), desc:varTxt(D.min,A.min,function(x){return fmtDuracao(x*60000);}), hero:true},
+    {eye:'PESSOAS ENVOLVIDAS', big:String(D.pessoas), desc:D.jorn+' jornada(s) registrada(s)', hero:false},
+    {eye:'ALÉM DE 12H (SOMA)', big:fmtDuracao(D.exc*60000), desc:D.acima+' jornada(s) acima de 12h', hero:false}
+  ];
+  var bx=13, bw=(W-26-9)/4, by=53, bh=24;
+  kp.forEach(function(k,i){
+    var x=bx+i*(bw+3);
+    doc.setFillColor(k.hero?255:246, k.hero?244:246, k.hero?243:248); doc.setDrawColor(k.hero?C.verm[0]:C.linha[0], k.hero?C.verm[1]:C.linha[1], k.hero?C.verm[2]:C.linha[2]);
+    doc.setLineWidth(k.hero?.5:.25); doc.roundedRect(x,by,bw,bh,2,2,'FD');
+    doc.setFont('helvetica','bold'); doc.setFontSize(6.6); doc.setTextColor(C.mut[0],C.mut[1],C.mut[2]); doc.text(k.eye, x+4, by+6);
+    doc.setFontSize(15); doc.setTextColor(k.hero?C.verm[0]:C.txt[0], k.hero?C.verm[1]:C.txt[1], k.hero?C.verm[2]:C.txt[2]); doc.text(k.big, x+4, by+15);
+    doc.setFont('helvetica','normal'); doc.setFontSize(6.6); doc.setTextColor(C.mut[0],C.mut[1],C.mut[2]); doc.text(doc.splitTextToSize(k.desc, bw-8)[0], x+4, by+20.5);
+  });
+
+  // ---- tabela de eventos (cabe em 1 página: até 16 linhas, o resto vira "outros")
+  var evs=D.fs.slice().sort(function(a,b){return a.inicio<b.inicio?-1:1;});
+  var MAX=16, mostra=evs.length>MAX ? evs.slice().sort(function(a,b){return totaisFech(b).minutos-totaisFech(a).minutos;}).slice(0,MAX-1).sort(function(a,b){return a.inicio<b.inicio?-1:1;}) : evs;
+  var body=mostra.map(function(f){ var t=totaisFech(f);
+    var sit=f.tipo==='sem_conversa'?'Sem conversa':(f.ressalvas?'Com observações':'Normal');
+    return [f.evento_nome, fmtDia(f.inicio)+(f.fim!==f.inicio?' a '+fmtDia(f.fim):''), {content:String(f.totais.pessoas),styles:{halign:'center'}}, {content:String(t.jornadas),styles:{halign:'center'}},
+      {content:f.tipo==='sem_conversa'&&!t.minutos?'—':fmtDuracao(t.minutos*60000),styles:{fontStyle:'bold',halign:'right'}}, {content:sit,styles:{textColor:f.ressalvas?C.verm:C.mut}}]; });
+  if(evs.length>MAX){ var resto=evs.filter(function(f){return mostra.indexOf(f)<0;}); var rm=resto.reduce(function(s,f){return s+totaisFech(f).minutos;},0);
+    body.push([{content:'+ '+resto.length+' outro(s) evento(s)',styles:{fontStyle:'italic',textColor:C.mut}},'','','',{content:fmtDuracao(rm*60000),styles:{halign:'right'}},'']); }
+  if(!body.length) body.push([{content:'Nenhum evento fechado ainda neste mês.',colSpan:6,styles:{textColor:C.mut,halign:'center'}}]);
+  body.push([{content:'TOTAL DO MÊS',colSpan:2,styles:{fillColor:C.cinza,fontStyle:'bold'}},{content:String(D.pessoas),styles:{fillColor:C.cinza,fontStyle:'bold',halign:'center'}},{content:String(D.jorn),styles:{fillColor:C.cinza,fontStyle:'bold',halign:'center'}},{content:fmtDuracao(D.min*60000),styles:{fillColor:C.cinza,fontStyle:'bold',halign:'right',textColor:C.verm}},{content:'',styles:{fillColor:C.cinza}}]);
+  doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(C.txt[0],C.txt[1],C.txt[2]); doc.text('Eventos do mês', 13, by+bh+8);
+  pdfTabela(doc,{startY:by+bh+10, head:[['Evento','Período','Pessoas','Jornadas','Horas','Fechamento']], body:body,
+    styles:{font:'helvetica', fontSize:7.3, cellPadding:1.5, textColor:C.txt, lineColor:C.linha, lineWidth:.2, valign:'middle', fillColor:[255,255,255]},
+    columnStyles:{0:{cellWidth:72,fontStyle:'bold'},1:{cellWidth:24},2:{cellWidth:16},3:{cellWidth:17},4:{cellWidth:20},5:{cellWidth:'auto'}}});
+
+  // ---- duas colunas: mais horas  |  pontos de atenção
+  var y=doc.lastAutoTable.finalY+8, colW=(W-26-6)/2;
+  doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(C.txt[0],C.txt[1],C.txt[2]);
+  doc.text('Mais horas no mês', 13, y); doc.text('Pontos de atenção', 13+colW+6, y);
+  pdfTabela(doc,{startY:y+2.5, margin:{left:13, right:W-13-colW}, head:[['Colaborador','Jornadas','Horas']],
+    body:D.top.length?D.top.map(function(p){return [p.nome, {content:String(p.dias),styles:{halign:'center'}}, {content:fmtDuracao(p.min*60000),styles:{fontStyle:'bold',halign:'right'}}];}):[[{content:'—',colSpan:3}]],
+    styles:{font:'helvetica', fontSize:7.3, cellPadding:1.5, textColor:C.txt, lineColor:C.linha, lineWidth:.2, fillColor:[255,255,255]},
+    columnStyles:{0:{cellWidth:'auto'},1:{cellWidth:16},2:{cellWidth:20}}});
+  var yTop=doc.lastAutoTable.finalY;
+  var pts=[];
+  if(D.abertos.length) pts.push(['Eventos ainda não fechados ('+D.abertos.length+')', D.abertos.slice(0,6).map(function(e){return e.nome;}).join(', ')+(D.abertos.length>6?'…':'')]);
+  if(D.acima) pts.push(['Jornadas acima de 12h: '+D.acima, 'Somam '+fmtDuracao(D.exc*60000)+' além das 12h.']);
+  if(D.ress) pts.push(['Fechamentos com observações: '+D.ress+' ressalva(s)', 'Registros sem horário no grupo ou com horário duvidoso, justificados no fechamento.']);
+  if(D.incompl) pts.push(['Jornadas sem registro completo: '+D.incompl, 'Não entram no total de horas.']);
+  if(D.adend) pts.push(['Adendos após o fechamento: '+D.adend, 'Inclusões registradas com data e hora.']);
+  if(D.semConv) pts.push(['Eventos pontuais (sem conversa): '+D.semConv, 'Fechados pela escala da planilha.']);
+  if(!pts.length) pts.push(['Nenhum ponto de atenção', 'Todos os eventos fechados sem ressalvas.']);
+  var px=13+colW+6, py=y+5;
+  pts.forEach(function(p){
+    doc.setFillColor(C.verm[0],C.verm[1],C.verm[2]); doc.circle(px+1.2, py-1, .9, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(7.6); doc.setTextColor(C.txt[0],C.txt[1],C.txt[2]); doc.text(p[0], px+4, py);
+    doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(C.mut[0],C.mut[1],C.mut[2]);
+    var l=doc.splitTextToSize(p[1], colW-6).slice(0,2); doc.text(l, px+4, py+3.6);
+    py+=4.2+l.length*3.4;
+  });
+
+  // ---- assinatura
+  var ya=Math.max(yTop, py)+14; if(ya>H-26) ya=H-26;
+  doc.setDrawColor(C.mut[0],C.mut[1],C.mut[2]); doc.setLineWidth(.25); doc.line(13, ya, 83, ya);
+  doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(C.mut[0],C.mut[1],C.mut[2]);
+  doc.text('Mirthes · Gerente de RH/DP — ILED Produções', 13, ya+4);
+  pdfRodape(doc);
+  doc.save('relatorio_diretoria_'+mes+'.pdf');
+}
 
 /* ============ AÇÕES — JORNADAS ============ */
 function acharMarca(id){ return STORE.marcas.find(function(x){return x.id===id;}); }
@@ -2077,7 +2353,7 @@ function nomeEvento(id){ var e=STORE.eventos.find(function(x){return x.id===id;}
 function filtrar(arr){ return FILTRO_EV==='todos' ? arr : arr.filter(function(r){return r.eventoId===FILTRO_EV;}); }
 
 function render(){
-  document.getElementById('tabs').innerHTML = ['agenda','importar','horarios','colaboradores','banco','dashboard','financeiro','fotos'].map(function(t){
+  document.getElementById('tabs').innerHTML = ['agenda','importar','horarios','colaboradores','banco','dashboard'].map(function(t){
     var labels={agenda:'📆 Agenda do mês',banco:'🗄 Banco de dados',dashboard:'Resumo',importar:'Importar',horarios:'Jornadas',colaboradores:'Colaboradores',financeiro:'Financeiro',fotos:'Comprovantes'};
     return '<button class="'+(TAB===t?'active':'')+'" onclick="goTab(\''+t+'\')">'+labels[t]+'</button>';
   }).join('');
@@ -2087,6 +2363,7 @@ function render(){
     return '<option value="'+e.id+'"'+(FILTRO_EV===e.id?' selected':'')+'>'+esc(e.nome)+'</option>';
   }).join('');
   if(FILTRO_EV!=='todos') sel.value=FILTRO_EV;
+  sel.style.display = (TAB==='agenda'||TAB==='banco'||TAB==='colaboradores'||TAB==='importar') ? 'none' : '';
 
   var m=document.getElementById('main');
   if(TAB==='agenda') m.innerHTML=renderAgenda();
@@ -2111,19 +2388,19 @@ function renderDashboard(){
   var h='<div class="kpis">'
     +'<div class="card kpi hero"><div class="eye">Jornadas</div><div class="big">'+compl.length+'</div><div class="desc">'+Object.keys(pessoas).length+' pessoa(s) · '+(pend?'<b style="color:var(--amber)">'+pend+' pendente(s)</b>':'nenhuma pendente')+'</div></div>'
     +'<div class="card kpi"><div class="eye">Horas trabalhadas</div><div class="big">'+fmtDuracao(totalMs)+'</div><div class="desc">soma das jornadas completas</div></div>'
-    +'<div class="card kpi"><div class="eye">Financeiro pendente</div><div class="big">'+fmtMoney(totalPend)+'</div><div class="desc">'+pendFin.length+' menção(ões) a confirmar</div></div>'
-    +'<div class="card kpi"><div class="eye">Fotos por revisar</div><div class="big">'+fotosPend+'</div><div class="desc">de '+fot.length+' comprovante(s) recebido(s)</div></div>'
+    +'<div class="card kpi"><div class="eye">Acima de 12h</div><div class="big">'+compl.filter(function(r){return r.durMs>12*3600000;}).length+'</div><div class="desc">jornadas em conferência</div></div>'
+    +'<div class="card kpi"><div class="eye">Eventos fechados</div><div class="big">'+(STORE.fechamentos||[]).length+'</div><div class="desc">no 🗄 Banco de dados</div></div>'
     +'</div>';
   if(!STORE.eventos.length){
     h+='<div class="card empty">Nenhum evento importado ainda. Vá em <b style="color:var(--txt)">Importar</b> pra colar a conversa do primeiro grupo.</div>';
   } else {
-    h+='<div class="card"><div class="section-title">Eventos importados</div><div class="tablewrap"><table><thead><tr><th>Evento</th><th>Jornadas</th><th>Pendentes</th><th>Pessoas</th><th>Horas</th><th>Menções financeiras</th><th></th></tr></thead><tbody>';
+    h+='<div class="card"><div class="section-title">Eventos importados</div><div class="tablewrap"><table><thead><tr><th>Evento</th><th>Jornadas</th><th>Pendentes</th><th>Pessoas</th><th>Horas</th><th></th></tr></thead><tbody>';
     STORE.eventos.forEach(function(e){
       var ej=montarJornadas(STORE.marcas.filter(function(r){return r.eventoId===e.id;}));
       var ec=ej.filter(function(r){return r.durMs!=null;});
       var ef=STORE.financeiro.filter(function(r){return r.eventoId===e.id;});
       var pes={}; ej.forEach(function(r){pes[chaveNome(r.nome)]=true;});
-      h+='<tr><td>'+esc(e.nome)+'</td><td>'+ec.length+'</td><td>'+((ej.length-ec.length)?'<span class="badge pend">'+(ej.length-ec.length)+'</span>':'—')+'</td><td>'+Object.keys(pes).length+'</td><td>'+fmtDuracao(ec.reduce(function(s,r){return s+r.durMs;},0))+'</td><td>'+ef.length+'</td>'
+      h+='<tr><td>'+esc(e.nome)+'</td><td>'+ec.length+'</td><td>'+((ej.length-ec.length)?'<span class="badge pend">'+(ej.length-ec.length)+'</span>':'—')+'</td><td>'+Object.keys(pes).length+'</td><td>'+fmtDuracao(ec.reduce(function(s,r){return s+r.durMs;},0))+'</td>'
         +'<td><button class="btn ghost sm" onclick="delEvento(\''+e.id+'\')">Excluir</button></td></tr>';
     });
     h+='</tbody></table></div></div>';
@@ -2135,7 +2412,7 @@ function renderDashboard(){
 function renderImportar(){
   return '<div class="card">'
     +'<div class="section-title"><span class="step-num">1</span> Exporte a conversa do grupo</div>'
-    +'<div class="muted" style="font-size:12.5px;line-height:1.6;margin-bottom:16px">No grupo do evento, no celular: <b style="color:var(--txt)">⋮ → Mais → Exportar conversa</b>. Escolha <b style="color:var(--txt)">"Incluir mídia"</b> se quiser trazer as fotos de comprovante junto (gera um <b>.zip</b>). "Sem mídia" gera só o <b>.txt</b>. Também aceito arquivos <b>.md</b> convertidos.</div>'
+    +'<div class="muted" style="font-size:12.5px;line-height:1.6;margin-bottom:16px">No grupo do evento, no celular: <b style="color:var(--txt)">⋮ → Mais → Exportar conversa</b>. Escolha <b style="color:var(--txt)">"Sem mídia"</b> (gera o <b>.txt</b>, mais leve). Também aceito .zip e .md.</div>'
     +'<div class="section-title"><span class="step-num">2</span> Qual evento?</div>'
     +'<div class="flex" style="margin-bottom:16px">'
     +(function(){ var ag=agendaAtual(); if(!ag) return ''; return '<label class="fl" style="flex:1;min-width:260px;margin-bottom:0">Evento da agenda do mês<select id="impAgenda"><option value="">— escolha —</option>'+ag.eventos.filter(function(e){return e.nPessoas;}).map(function(e){return '<option value="'+ag.mes+'|'+e.key+'">'+esc(e.titulo)+' ('+fmtDia(e.inicio)+(e.fim!==e.inicio?'–'+fmtDia(e.fim):'')+')</option>';}).join('')+'</select></label>'; })()
@@ -2332,7 +2609,7 @@ function renderPainelFechamento(todas){
   var ids=[]; todas.forEach(function(r){ if(ids.indexOf(r.eventoId)<0) ids.push(r.eventoId); });
   if(!ids.length) return '';
   var h='<div class="card" style="border-top:3px solid var(--red)"><div class="section-title">🔒 Fechamento do evento</div>'
-    +'<div class="muted" style="font-size:11.5px;margin-bottom:10px">Quando tudo estiver validado, feche o evento: ele vai para o 🗄 Banco de dados e não pode mais ser alterado (só com adendo).</div>';
+    +'<div class="muted" style="font-size:11.5px;margin-bottom:10px">Quando tudo estiver validado, feche o evento: ele vai para o 🗄 Banco de dados e não pode mais ser alterado (só com adendo). Se alguma coisa não tiver como resolver (ex: alguém não registrou no grupo), dá para fechar mesmo assim registrando uma observação.</div>';
   ids.forEach(function(id){
     var rs=todas.filter(function(r){return r.eventoId===id;});
     var av=rs.filter(function(r){return r.alertas.length;}).length, pt=rs.filter(function(r){return r.rev&&r.rev.st==='pontual';}).length;
@@ -2342,9 +2619,9 @@ function renderPainelFechamento(todas){
     h+='<div class="flex" style="justify-content:space-between;padding:10px 12px;border:1px solid var(--line2);border-radius:10px;margin-bottom:8px;background:'+(pronto?'rgba(61,220,132,.05)':'rgba(255,176,32,.05)')+'">'
       +'<div><b>'+esc(nomeEvento(id))+'</b><div class="muted" style="font-size:11.5px;margin-top:3px">'+rs.length+' jornada(s) · '+fmtDuracao(tot)+' · '
       +(pronto ? '<span style="color:var(--grn);font-weight:700">✓ pronto para fechar</span>'+(nv?' ('+nv+' linha(s) OK ainda sem validar — serão validadas no fechamento)':'')
-               : '<span style="color:var(--amber);font-weight:700">'+(av?av+' aviso(s) ⚠ ':'')+(pt?pt+' dúvida(s) ❓ ':'')+'— resolva antes de fechar</span>')
+               : '<span style="color:var(--amber);font-weight:700">'+(av?av+' aviso(s) ⚠ ':'')+(pt?pt+' dúvida(s) ❓ ':'')+'— resolva, ou feche com observação</span>')
       +'</div></div>'
-      +'<button class="btn" '+(pronto?'':'style="opacity:.55"')+' onclick="fecharEvento(\''+id+'\')">🔒 Fechar evento</button></div>';
+      +'<button class="btn" '+(pronto?'':'style="background:#3a2a10;border:1px solid var(--amber);box-shadow:none"')+' onclick="fecharEvento(\''+id+'\')">🔒 Fechar evento'+(pronto?'':' com observação')+'</button></div>';
   });
   return h+'</div>';
 }

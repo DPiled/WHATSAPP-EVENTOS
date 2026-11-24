@@ -721,6 +721,9 @@ function processarImportacao(){
 }
 function importarConversa(nomeEvento, texto, arquivos, agendaRef, eventoId){
   pendingFiles = arquivos||[];
+  if(pendingFiles.length){ var mesConv=(agendaRef&&agendaRef.split('|')[0]) || AGENDA_MES || ''; var nConv=0;
+    Promise.all(pendingFiles.map(function(fl){ return gravarNaPasta('conversa', nomeEvento+' - '+fl.name, fl, mesConv).then(function(g){ if(g) nConv++; }); }))
+      .then(function(){ if(nConv) toast('💬 Conversa guardada em 06_CONVERSAS_WHATSAPP'); }); }
   var evento = eventoId ? STORE.eventos.find(function(e){return e.id===eventoId;}) : null;
   if(!evento && agendaRef) evento = STORE.eventos.find(function(e){return e.agendaRef===agendaRef;});
   if(!evento) evento = STORE.eventos.find(function(e){return e.nome.toLowerCase()===nomeEvento.toLowerCase();});
@@ -839,7 +842,8 @@ function lerPlanilhaMes(files){
   if(typeof XLSX==='undefined'){ alert('Não consegui carregar o leitor de Excel (precisa de internet na primeira vez que abre o programa).'); return; }
   var rd=new FileReader();
   rd.onload=function(){
-    try{ var wb=XLSX.read(new Uint8Array(rd.result),{type:'array'}); processarCronograma(wb, f.name); }
+    try{ var wb=XLSX.read(new Uint8Array(rd.result),{type:'array'}); processarCronograma(wb, f.name);
+      if(AGENDA_MES) gravarNaPasta('planilha', AGENDA_MES+'_'+f.name, f).then(function(g){ if(g) toast('📊 Planilha guardada em 05_PLANILHAS_CRONOGRAMA'); }); }
     catch(e){ console.error(e); alert('Não consegui ler essa planilha: '+e.message); }
   };
   rd.readAsArrayBuffer(f);
@@ -1169,6 +1173,8 @@ function prepararDoc(doc){
   doc.text=function(t){ var a=[].slice.call(arguments); a[0]=Array.isArray(t)?t.map(pdfSafe):pdfSafe(t); return _t.apply(null,a); };
   var _a=doc.autoTable.bind(doc);
   doc.autoTable=function(o){ var dp=o.didParseCell; o.didParseCell=function(d){ d.cell.text=(d.cell.text||[]).map(pdfSafe); if(dp) dp(d); }; return _a(o); };
+  var _sv=doc.save.bind(doc);
+  doc.save=function(nome){ try{ gravarNaPasta('relatorio', nome, doc.output('blob'), mesDoNome(nome)||AGENDA_MES); }catch(e){} return _sv(nome); };
   return doc;
 }
 function baixarListaEventosPDF(){
@@ -1451,6 +1457,9 @@ function sincronizarBanco(silencioso){
 var BANCO_MES=null, FECH_SEL=null, BUSCA_P='', FECH_PDF_AUTO=true;
 function setBuscaPessoa(v){ BUSCA_P=v; render(); var el=document.getElementById('buscaP'); if(el){ el.focus(); el.setSelectionRange(v.length,v.length); } }
 function renderBanco(){
+  return cardPasta()+renderBancoBase();
+}
+function renderBancoBase(){
   var fs=(STORE.fechamentos||[]).slice().sort(function(a,b){return a.inicio<b.inicio?-1:1;});
   var cfg=sbCfg(), pend=fs.filter(function(f){return f.sync!=='ok' || (f.adendos||[]).some(function(a){return a.sync!=='ok';});}).length;
   var h='<div class="card" style="border-top:3px solid '+(SB_STATUS==='ok'&&!pend?'var(--grn)':'var(--amber)')+'"><div class="flex" style="justify-content:space-between">'
@@ -1639,7 +1648,7 @@ function baixarMesExcel(mes){
   fs.forEach(function(f){ var t=totaisFech(f); c.push([f.evento_nome, fmtDia(f.inicio)+' a '+fmtDia(f.fim), f.tipo==='sem_conversa'?'Sem conversa (escala)':(f.ressalvas?'Com observações':'Normal'), fmtDT(f.fechado_em), f.totais.pessoas, t.jornadas, dur(t.minutos), (f.adendos||[]).length, f.ressalvas||0, f.observacao_geral||'', (f.hash||'').slice(0,16)]); });
   var w3=XLSX.utils.aoa_to_sheet(c); w3['!cols']=[{wch:32},{wch:14},{wch:20},{wch:16},{wch:9},{wch:9},{wch:14},{wch:9},{wch:10},{wch:50},{wch:18}];
   XLSX.utils.book_append_sheet(wb, w3, 'Eventos do mês');
-  XLSX.writeFile(wb, 'fechamentos_'+mes+'.xlsx');
+  salvarXlsx(wb, 'fechamentos_'+mes+'.xlsx');
 }
 
 /* ============ TUDO NA NUVEM: abrir de qualquer conta / computador / celular ============ */
@@ -1733,7 +1742,7 @@ function pingBanco(){ try{ var cl=sbCliente(); if(cl && cl.rpc) cl.rpc('wa_ping'
 function iniciarNuvem(){
   if(NUVEM_ON) return; NUVEM_ON=true;
   fecharLogin(); atualizarSelo(); pingBanco();
-  puxarEstado().then(function(){ return sincronizarBanco(true); }).then(function(){ render(); atualizarSelo(); });
+  puxarEstado().then(function(){ return sincronizarBanco(true); }).then(function(){ render(); atualizarSelo(); }).then(function(){ return iniciarPasta(); });
   // a cada 1 minuto confere se outro aparelho mudou algo (só quando não há nada pendente aqui)
   setInterval(function(){ if(SB_USER && !metaEstado().sujo && !document.hidden) puxarEstado(); }, 60000);
   window.addEventListener('beforeunload', function(e){ if(metaEstado().sujo && SB_USER){ enviarEstado(false); } });
@@ -2158,7 +2167,7 @@ function baixarExcel(){
     var w4=XLSX.utils.aoa_to_sheet(a4); w4['!cols']=[{wch:12},{wch:30},{wch:22},{wch:32}];
     XLSX.utils.book_append_sheet(wb, w4, 'Escalados sem registro');
   }
-  XLSX.writeFile(wb, nomeArquivo('xlsx'));
+  salvarXlsx(wb, nomeArquivo('xlsx'));
 }
 
 /* ============ PADRÃO VISUAL DOS PDFs (modelo "Extrato" ILED) ============ */
@@ -2344,7 +2353,8 @@ function restaurarBackup(files){
   rd.readAsText(f,'utf-8');
 }
 function exportarBackup(){
-  var blob=new Blob([JSON.stringify({versao:5,geradoEm:new Date().toISOString(),eventos:STORE.eventos,marcas:STORE.marcas,financeiro:STORE.financeiro,colaboradores:STORE.colaboradores,agendas:STORE.agendas,fechamentos:STORE.fechamentos,apelidos:STORE.apelidos},null,2)],{type:'application/json'});
+  var blob=new Blob([JSON.stringify(dadosBackup(),null,2)],{type:'application/json'});
+  if(PASTA && PASTA_PERM==='granted') gravarNaPasta('backup','whatsapp_eventos_iled_backup_'+isoDia(new Date())+'.json',blob).then(function(g){ if(g){ try{ localStorage.setItem('wa_pasta_ultimo_backup', new Date().toISOString()); }catch(e){} atualizarAvisoPasta(); } });
   var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='whatsapp_eventos_iled_backup_'+isoDia(new Date())+'.json'; a.click();
 }
 function setFiltroEvento(v){ FILTRO_EV=v; render(); }
@@ -2907,6 +2917,135 @@ function exportarFotos(somenteMarcadas){
 document.getElementById('lightbox').addEventListener('click',function(e){ if(e.target.id==='lightbox')closeLightbox(); });
 
 
+
+function salvarXlsx(wb, nome){
+  try{ if(PASTA && PASTA_PERM==='granted'){ var out=XLSX.write(wb,{bookType:'xlsx',type:'array'}); gravarNaPasta('relatorio', nome, new Blob([out],{type:'application/octet-stream'}), mesDoNome(nome)||AGENDA_MES); } }catch(e){}
+  XLSX.writeFile(wb, nome);
+}
+/* ============ PASTA DO PC: backup semanal automático + cópia de tudo que entra e sai ============ */
+// Conecta-se uma vez a pasta "WHATSAPP EVENTOS - ILED" (Chrome do computador). Depois o programa grava sozinho:
+// 04_BACKUPS (backup .json a cada 7 dias) · 05_PLANILHAS_CRONOGRAMA · 06_CONVERSAS_WHATSAPP/<mês> · 07_RELATORIOS_GERADOS/<mês>
+var PASTA=null, PASTA_PERM='', PASTA_DIAS=7;
+var PASTA_SUB={ backup:['04_BACKUPS'], planilha:['05_PLANILHAS_CRONOGRAMA'], conversa:['06_CONVERSAS_WHATSAPP'], relatorio:['07_RELATORIOS_GERADOS'] };
+function pastaSuportada(){ return !!(window.showDirectoryPicker && window.indexedDB); }
+function pastaIDB(modo, valor){
+  return new Promise(function(ok){
+    try{
+      var r=indexedDB.open('wa_iled_pasta',1);
+      r.onupgradeneeded=function(){ r.result.createObjectStore('h'); };
+      r.onerror=function(){ ok(null); };
+      r.onsuccess=function(){
+        try{
+          var tx=r.result.transaction('h', modo==='get'?'readonly':'readwrite'), st=tx.objectStore('h');
+          var q = modo==='get' ? st.get('raiz') : (modo==='del' ? st.delete('raiz') : st.put(valor,'raiz'));
+          q.onsuccess=function(){ ok(modo==='get'?q.result:true); }; q.onerror=function(){ ok(null); };
+        }catch(e){ console.warn('Pasta do PC: não lembrei a pasta', e); ok(null); }
+      };
+    }catch(e){ ok(null); }
+  });
+}
+function ultimoBackupPasta(){ try{ return localStorage.getItem('wa_pasta_ultimo_backup')||''; }catch(e){ return ''; } }
+function diasDesdeBackup(){ var u=ultimoBackupPasta(); return u ? Math.floor((Date.now()-new Date(u).getTime())/86400000) : 9999; }
+function nomeSeguro(n){ return String(n||'arquivo').replace(/[\\\/:*?"<>|\u0000-\u001f]+/g,'-').replace(/\s+/g,' ').trim().slice(0,150); }
+function mesDoNome(n){ var m=String(n||'').match(/(20\d\d)-(0[1-9]|1[0-2])/); return m ? m[1]+'-'+m[2] : ''; }
+function pastaMes(mes){ var q=(mes||isoDia(new Date()).slice(0,7)).split('-'); return q[0]+'-'+q[1]+'_'+MESES_NOME[+q[1]-1].toUpperCase(); }
+function pastaPermissao(pedir){
+  if(!PASTA) return Promise.resolve(false);
+  var o={mode:'readwrite'};
+  return Promise.resolve(PASTA.queryPermission ? PASTA.queryPermission(o) : 'granted').then(function(st){
+    if(st==='granted' || !pedir) return st;
+    return PASTA.requestPermission(o);
+  }).then(function(st){ PASTA_PERM=st; atualizarAvisoPasta(); return st==='granted'; }).catch(function(){ return false; });
+}
+function conectarPasta(){
+  if(!pastaSuportada()){ alert('Esse recurso funciona no Google Chrome (ou Edge) do computador.'); return; }
+  window.showDirectoryPicker({id:'wa_iled_pasta', mode:'readwrite'}).then(function(h){
+    if(/^0\d_/.test(h.name) && !confirm('Você escolheu a pasta "'+h.name+'".\n\nO certo é escolher a pasta PRINCIPAL "WHATSAPP EVENTOS - ILED" (a que tem 01_PROGRAMA, 04_BACKUPS...).\n\nUsar mesmo assim?')) return;
+    PASTA=h; PASTA_PERM='granted';
+    return pastaIDB('put', h).then(function(){
+      toast('📁 Pasta "'+h.name+'" conectada');
+      return fazerBackupPasta(true);
+    });
+  }).catch(function(e){ if(e && e.name!=='AbortError') alert('Não consegui conectar a pasta: '+e.message); }).then(function(){ render(); });
+}
+function desconectarPasta(){
+  if(!confirm('Desconectar a pasta do PC? Nada é apagado; o programa só para de salvar lá.')) return;
+  PASTA=null; PASTA_PERM=''; pastaIDB('del').then(function(){ atualizarAvisoPasta(); render(); });
+}
+// grava um arquivo dentro da pasta (cria as subpastas se faltarem). Nunca trava o programa: se falhar, só avisa no console.
+function gravarNaPasta(sub, nome, blob, mes){
+  if(!PASTA || PASTA_PERM!=='granted' || !blob) return Promise.resolve(false);
+  var caminho=(PASTA_SUB[sub]||[sub]).slice();
+  if(sub==='conversa' || sub==='relatorio') caminho.push(pastaMes(mes));
+  var dir=Promise.resolve(PASTA);
+  caminho.forEach(function(c){ dir=dir.then(function(d){ return d.getDirectoryHandle(c,{create:true}); }); });
+  return dir.then(function(d){ return d.getFileHandle(nomeSeguro(nome),{create:true}); })
+    .then(function(fh){ return fh.createWritable(); })
+    .then(function(w){ return w.write(blob).then(function(){ return w.close(); }); })
+    .then(function(){ return true; })
+    .catch(function(e){ console.warn('Pasta do PC: não gravou '+nome, e); return false; });
+}
+function dadosBackup(){
+  return {versao:5,geradoEm:new Date().toISOString(),eventos:STORE.eventos,marcas:STORE.marcas,financeiro:STORE.financeiro,colaboradores:STORE.colaboradores,agendas:STORE.agendas,fechamentos:STORE.fechamentos,apelidos:STORE.apelidos};
+}
+function fazerBackupPasta(manual){
+  var ir = manual ? pastaPermissao(true) : Promise.resolve(PASTA_PERM==='granted');
+  return ir.then(function(ok){
+    if(!ok){ if(manual) alert('O Chrome não liberou a pasta. Clique em "Permitir" quando ele perguntar.'); return false; }
+    var blob=new Blob([JSON.stringify(dadosBackup(),null,2)],{type:'application/json'});
+    var nome='whatsapp_eventos_iled_backup_'+isoDia(new Date())+'.json';
+    return gravarNaPasta('backup', nome, blob).then(function(g){
+      if(g){ try{ localStorage.setItem('wa_pasta_ultimo_backup', new Date().toISOString()); }catch(e){}
+        toast('💾 Backup salvo em 04_BACKUPS ('+nome+')'); }
+      else if(manual) alert('Não consegui gravar o backup na pasta. Confira se a pasta ainda existe e conecte de novo.');
+      atualizarAvisoPasta(); if(TAB==='banco') render(); return g;
+    });
+  });
+}
+// ao abrir o programa: se já passou 1 semana, faz o backup sozinho (ou mostra um aviso de 1 clique, se o Chrome pedir permissão)
+function checarBackupSemanal(){
+  if(!PASTA) return Promise.resolve();
+  return pastaPermissao(false).then(function(ok){
+    if(diasDesdeBackup()<PASTA_DIAS) return;
+    if(ok) return fazerBackupPasta(false);
+    atualizarAvisoPasta();
+  });
+}
+function atualizarAvisoPasta(){
+  var el=document.getElementById('avisoPasta');
+  if(!el){ el=document.createElement('div'); el.id='avisoPasta'; document.body.appendChild(el); }
+  var precisa = PASTA && (PASTA_PERM!=='granted' || diasDesdeBackup()>=PASTA_DIAS);
+  if(!precisa){ el.style.display='none'; return; }
+  el.style.cssText='display:flex;position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:60;gap:10px;align-items:center;background:#141419;color:#fff;border:2px solid #e00500;border-radius:12px;padding:10px 14px;font-size:13px;box-shadow:0 8px 28px rgba(0,0,0,.35);max-width:92vw';
+  el.innerHTML='<span>💾 '+(diasDesdeBackup()>=PASTA_DIAS?'Hora do <b>backup semanal</b> na pasta do PC':'Libere a <b>pasta do PC</b> para o programa salvar seus arquivos')+'</span>'
+    +'<button class="btn sm" onclick="fazerBackupPasta(true)">Salvar agora</button>'
+    +'<button class="btn ghost sm" style="color:#fff" onclick="this.parentNode.style.display=\'none\'">Depois</button>';
+}
+function cardPasta(){
+  var h='<div class="card" style="border-top:3px solid '+(PASTA&&PASTA_PERM==='granted'?'var(--grn)':'var(--amber)')+'">'
+    +'<div class="section-title" style="margin-bottom:4px">📁 Pasta do PC e backup automático</div>';
+  if(!pastaSuportada()) return h+'<div class="muted" style="font-size:12.5px">Disponível só no <b style="color:var(--txt)">Chrome do computador</b>. No celular os dados continuam salvos na nuvem normalmente.</div></div>';
+  var u=ultimoBackupPasta(), d=diasDesdeBackup();
+  if(!PASTA){
+    return h+'<div class="muted" style="font-size:12.5px;line-height:1.55;margin-bottom:10px">Conecte <b style="color:var(--txt)">uma vez</b> a pasta <b style="color:var(--txt)">WHATSAPP EVENTOS - ILED</b> do seu computador. A partir daí o programa salva sozinho:<br>'
+      +'💾 <b style="color:var(--txt)">backup semanal</b> em 04_BACKUPS · 📊 a <b style="color:var(--txt)">planilha do mês</b> em 05 · 💬 as <b style="color:var(--txt)">conversas</b> em 06 · 📄 os <b style="color:var(--txt)">PDFs e planilhas gerados</b> em 07 (uma pasta por mês).</div>'
+      +'<button class="btn" onclick="conectarPasta()">📁 Conectar pasta do projeto</button></div>';
+  }
+  h+='<div class="flex" style="justify-content:space-between;align-items:center">'
+    +'<div style="font-size:12.5px;line-height:1.6">Pasta: <b>'+esc(PASTA.name)+'</b> '+(PASTA_PERM==='granted'?'<span class="badge ok">liberada</span>':'<span class="badge pend">precisa liberar</span>')
+    +'<br>Último backup: <b>'+(u?fmtDT(u)+' ('+(d===0?'hoje':d+' dia(s) atrás')+')':'nenhum ainda')+'</b> · próximo: '+(u?(d>=PASTA_DIAS?'<b style="color:var(--amber)">agora</b>':'em '+(PASTA_DIAS-d)+' dia(s)'):'<b style="color:var(--amber)">agora</b>')+'</div>'
+    +'<div class="flex">'+(PASTA_PERM!=='granted'?'<button class="btn sm" onclick="pastaPermissao(true).then(function(){render();})">🔓 Liberar pasta</button>':'')
+      +'<button class="btn sm" onclick="fazerBackupPasta(true)">💾 Backup agora</button>'
+      +'<button class="btn ghost sm" onclick="conectarPasta()">Trocar pasta</button>'
+      +'<button class="btn ghost sm" onclick="desconectarPasta()">Desconectar</button></div></div>'
+    +'<div class="muted" style="font-size:11px;margin-top:8px">O Chrome pode perguntar se permite o site editar a pasta: escolha <b>"Permitir em todas as visitas"</b> para o backup semanal acontecer sem precisar clicar.</div>';
+  return h+'</div>';
+}
+function iniciarPasta(){
+  if(!pastaSuportada()) return Promise.resolve();
+  return pastaIDB('get').then(function(h){ if(h){ PASTA=h; return checarBackupSemanal(); } }).then(function(){ if(TAB==='banco') render(); });
+}
+
 /* ============ BOOT ============ */
 document.getElementById('logoTopo').src=ILED_LOGO_APP;
 carregar();
@@ -2916,7 +3055,7 @@ setTimeout(function(){
   if(!window.supabase){ atualizarSelo(); return; }
   verificarSessao().then(function(u){
     if(u){ SB_STATUS='ok'; iniciarNuvem(); }
-    else { atualizarSelo(); mostrarLogin(); }
+    else { atualizarSelo(); mostrarLogin(); iniciarPasta(); }
   });
 }, 300);
 </script>

@@ -1181,33 +1181,36 @@ function baixarListaEventosPDF(){
   var ult=new Date(+p[0], +p[1], 0).getDate();
   var linhas=lista.map(function(e,i){
     var dias=Object.keys(e.dias).sort();
-    var ps={}; Object.keys(e.escala).forEach(function(d){ e.escala[d].forEach(function(id){ if(cad[id]) ps[cad[id].nome]=1; }); });
-    var nomes=Object.keys(ps).sort(function(a,c){return a.localeCompare(c,'pt-BR');});
-    return { n:i+1, titulo:e.uf+' - '+e.nome,
+    var s=situacaoEvento(ag,e), sit, cor;
+    if(s.st==='fechado'){ sit='FECHADO'+(s.fch.tipo==='sem_conversa'?' (sem conversa)':'')+(s.fch.ressalvas?'\n'+s.fch.ressalvas+' ressalva(s)':''); cor=[22,140,70]; }
+    else if(s.st==='conferencia'){ sit='EM CONFERÊNCIA\n'+(s.pend?s.pend+' a conferir':'pronto p/ fechar'); cor=s.pend?[200,120,0]:[30,100,200]; }
+    else { sit='A FAZER\nsubir conversa'; cor=[224,5,0]; }
+    return { n:i+1, titulo:e.uf+' - '+e.nome, st:s.st, sit:sit, cor:cor,
       periodo: fmtDia(dias[0])+(dias.length>1?' a '+fmtDia(dias[dias.length-1]):''),
-      fases: dias.map(function(d){ return diaSemana(d+'T12:00:00').slice(0,3)+' '+fmtDia(d)+': '+(e.dias[d]||'-'); }).join('\n'),
-      equipe: nomes.length? nomes.length+' pessoa(s): '+nomes.join(', ') : 'sem equipe escalada' };
+      fases: dias.map(function(d){ return diaSemana(d+'T12:00:00').slice(0,3)+' '+fmtDia(d)+': '+(e.dias[d]||'-'); }).join('\n') };
   });
+  var nF=linhas.filter(function(l){return l.st==='fechado';}).length, nC=linhas.filter(function(l){return l.st==='conferencia';}).length, nA=linhas.length-nF-nC;
+  var resumo=linhas.length+' evento(s)  ·  '+nF+' fechado(s)  ·  '+nC+' em conferência  ·  '+nA+' a fazer';
 
   if(!window.jspdf || !window.jspdf.jsPDF || !window.jspdf.jsPDF.API.autoTable){
     var w=window.open('','_blank'); if(!w){ alert('Libere pop-ups para imprimir.'); return; }
-    var h='<html><head><meta charset="utf-8"><title>Eventos '+nomeMes+'</title><style>body{font-family:Arial;font-size:11px;margin:0}header{background:#08080a;color:#fff;padding:16px 22px;border-bottom:4px solid #e00500}h1{font-size:17px;margin:0}main{padding:18px 22px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #dedee2;padding:5px;vertical-align:top}th{background:#141419;color:#fff;text-align:left}.box{width:13px;height:13px;border:1.5px solid #333;display:inline-block}</style></head><body><header><h1>Eventos do Mês — '+nomeMes+'/'+p[0]+'</h1>ILED Produções · Gestão de Pessoas</header><main><table><tr><th></th><th>#</th><th>Evento</th><th>Período</th><th>Dias / fases</th><th>Equipe escalada</th></tr>';
-    linhas.forEach(function(l){ h+='<tr><td><span class="box"></span></td><td>'+l.n+'</td><td><b>'+esc(l.titulo)+'</b></td><td>'+l.periodo+'</td><td>'+esc(l.fases).replace(/\n/g,'<br>')+'</td><td>'+esc(l.equipe)+'</td></tr>'; });
+    var h='<html><head><meta charset="utf-8"><title>Eventos '+nomeMes+'</title><style>body{font-family:Arial;font-size:11px;margin:0}header{background:#08080a;color:#fff;padding:16px 22px;border-bottom:4px solid #e00500}h1{font-size:17px;margin:0}main{padding:18px 22px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #dedee2;padding:5px;vertical-align:top}th{background:#141419;color:#fff;text-align:left}</style></head><body><header><h1>Eventos do Mês — '+nomeMes+'/'+p[0]+'</h1>ILED Produções · Gestão de Pessoas</header><main><p style="color:#6e7078">'+resumo+'</p><table><tr><th>Evento</th><th>Período</th><th>Dias / fases</th><th>Situação</th></tr>';
+    linhas.forEach(function(l){ h+='<tr><td><b>'+esc(l.titulo)+'</b></td><td>'+l.periodo+'</td><td>'+esc(l.fases).replace(/\n/g,'<br>')+'</td><td style="font-weight:bold;color:rgb('+l.cor.join(',')+')">'+esc(l.sit).replace(/\n/g,'<br>')+'</td></tr>'; });
     w.document.write(h+'</table></main><script>window.print()<\/script></body></html>'); w.document.close(); return;
   }
   var doc=novoPDF();
   var cab=function(){ pdfCabecalho(doc, 'Eventos do Mês', 'Período: 01/'+p[1]+'/'+p[0]+' a '+ult+'/'+p[1]+'/'+p[0], 'Emitido em '+fmtDT(new Date())); };
   cab();
-  pdfTitulo(doc, nomeMes.toUpperCase()+' / '+p[0], linhas.length+' evento(s) com equipe escalada  ·  checklist para exportar as conversas do WhatsApp', 43);
+  pdfTitulo(doc, nomeMes.toUpperCase()+' / '+p[0], resumo, 43);
   pdfTabela(doc, {
     startY:54,
-    head:[['', '#', 'Evento', 'Período', 'Dias / fases', 'Equipe escalada']],
-    body: linhas.map(function(l){ return ['', l.n, l.titulo, l.periodo, l.fases, l.equipe]; }),
+    head:[['Evento', 'Período', 'Dias / fases', 'Situação']],
+    body: linhas.map(function(l){ return [l.titulo, l.periodo, l.fases, l.sit]; }),
     styles:{font:'helvetica', fontSize:7.6, cellPadding:1.9, textColor:PDF_COR.txt, lineColor:PDF_COR.linha, lineWidth:.2, valign:'top', fillColor:[255,255,255]},
-    columnStyles:{0:{cellWidth:8},1:{cellWidth:7,halign:'center',textColor:PDF_COR.mut},2:{cellWidth:46,fontStyle:'bold',fontSize:8.2},3:{cellWidth:19},4:{cellWidth:44,fontSize:7},5:{cellWidth:'auto',fontSize:6.9,textColor:PDF_COR.mut}},
-    didDrawCell:function(d){
-      if(d.section!=='body' || d.column.index!==0) return;
-      doc.setDrawColor(40,40,46); doc.setLineWidth(.35); doc.rect(d.cell.x+1.9, d.cell.y+1.9, 4.2, 4.2);
+    columnStyles:{0:{cellWidth:60,fontStyle:'bold',fontSize:8.2},1:{cellWidth:22},2:{cellWidth:62,fontSize:7},3:{cellWidth:'auto',fontStyle:'bold',fontSize:7.6}},
+    didParseCell:function(d){
+      if(d.section!=='body' || d.column.index!==3) return;
+      d.cell.styles.textColor=linhas[d.row.index].cor;
     },
     didDrawPage:function(){ cab(); }
   });
